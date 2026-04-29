@@ -265,7 +265,15 @@ Bereits ausgeführte Suchen:
 {searches}
 
 Schlage 3-5 weitere qmd-Suchanfragen vor, um den Ablauf zu vervollständigen.
-Suchanfragen sollten kurze Stichworte/Phrasen sein (Namen, Begriffe), keine Sätze.
+
+WICHTIG zum Format der Suchanfragen:
+- NUR reiner Stichworttext (2-5 Wörter, deutsche Begriffe oder Eigennamen).
+- KEINE Boolean-Operatoren (AND/OR), KEINE Anführungszeichen, KEINE
+  Datumsbereiche, KEINE Klammern, KEIN Präfix wie "qmd query:".
+- qmd kann nicht nach Datum filtern — gib also keine Datumsangaben mit.
+- Beispiel-richtig: "Wolf Warnken Kündigung", "Coaching Eric Fischer".
+- Beispiel-falsch: "'2024-06-20..2024-10-08' AND (X OR Y)".
+
 Antworte als JSON: {{"reasoning": "...", "suggestions": ["...", ...]}}"""
     raw = chat(model, [{"role": "system", "content": SYSTEM_PROMPT},
                        {"role": "user", "content": prompt}], json_mode=True)
@@ -432,6 +440,16 @@ def cmd_gaps(state: dict, model: str) -> None:
 Identifiziere zeitliche Lücken (>4 Wochen ohne Mails) oder thematische
 Brüche, die auffällig sind. Schlage pro Lücke eine konkrete qmd-Suchanfrage
 vor.
+
+WICHTIG zum Feld "search":
+- NUR reiner Stichworttext (2-5 deutsche Wörter / Eigennamen).
+- KEINE Boolean-Operatoren (AND/OR), KEINE Anführungszeichen, KEINE
+  Datumsbereiche, KEINE Klammern, KEIN Präfix wie "qmd query:".
+- qmd kann nicht nach Datum filtern. Datum gehört ins "period"-Feld,
+  NICHT in "search".
+- Beispiel-richtig: "Lohnzahlung Verwaltungspflichten Geschäftsführer".
+- Beispiel-falsch: "'2024-06-20..2024-10-08' AND (Lohn OR Abmahnung)".
+
 JSON: {{"gaps": [{{"period": "...", "concern": "...", "search": "..."}}]}}"""
     try:
         data = json.loads(chat(model, [

@@ -88,7 +88,8 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /suggest                  LLM schlägt 3-5 Suchanfragen vor
 :1  :2  …                 Vorschlag Nr. N direkt ausführen
 /review                   pending-Mails durchgehen
-/list                     Status-Übersicht (akzept./pending/aussortiert)
+/list                     Status-Übersicht der aktuellen Session
+/sessions                 alle gespeicherten Sessions auflisten
 /gaps                     LLM analysiert zeitliche Lücken
 /summary                  narrative Zusammenfassung erzeugen
 /export                   schreibt Markdown + CSV + mails/-Ordner
@@ -131,6 +132,15 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 ### Sessions
 
 Liegen unter `~/.local/share/mini-chatbot/sessions/recherche_<NAME>.json`.
+Auflisten ohne eine zu starten:
+
+```bash
+python3 recherche.py --list-sessions
+```
+
+Im REPL listet `/sessions` dasselbe (zum Wechseln aktuell `/quit` + neu
+starten mit anderem `-s`).
+
 Enthalten Fallbeschreibung, alle Kandidaten mit Status, Suchhistorie,
 letzte Vorschläge. Wiederaufnahme einfach mit demselben `-s NAME`.
 

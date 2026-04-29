@@ -113,6 +113,46 @@ def load_session(name: str) -> dict:
     }
 
 
+def list_sessions() -> list[dict]:
+    """Liefert Liste aller recherche_*-Sessions im SESSIONS_DIR."""
+    if not SESSIONS_DIR.exists():
+        return []
+    out = []
+    for p in SESSIONS_DIR.glob("recherche_*.json"):
+        try:
+            data = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        counts = {"accepted": 0, "pending": 0, "rejected": 0}
+        for c in data.get("candidates", {}).values():
+            counts[c.get("status", "pending")] = counts.get(
+                c.get("status", "pending"), 0) + 1
+        out.append({
+            "name": data.get("name", p.stem.removeprefix("recherche_")),
+            "path": p,
+            "mtime": p.stat().st_mtime,
+            "case": data.get("case_description", ""),
+            "counts": counts,
+        })
+    return sorted(out, key=lambda s: s["mtime"], reverse=True)
+
+
+def print_sessions() -> None:
+    sessions = list_sessions()
+    if not sessions:
+        print(f"Keine Sessions in {SESSIONS_DIR}.")
+        return
+    print(f"\n{len(sessions)} Session(s) in {SESSIONS_DIR}:\n")
+    for s in sessions:
+        ts = datetime.fromtimestamp(s["mtime"]).strftime("%Y-%m-%d %H:%M")
+        c = s["counts"]
+        print(f"  {s['name']}")
+        print(f"    zuletzt: {ts}  |  ✓{c['accepted']} ?{c['pending']} ✗{c['rejected']}")
+        if s["case"]:
+            print(f"    Fall:    {s['case'][:80]}")
+        print()
+
+
 def save_session(state: dict) -> None:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     session_path(state["name"]).write_text(
@@ -467,7 +507,8 @@ Befehle:
   /suggest                  LLM schlägt 3-5 Suchanfragen vor
   :1  :2  …                 letzten Vorschlag Nr. N direkt ausführen
   /review                   durch pending-Mails iterieren (a/r/s/b/q)
-  /list                     Status-Übersicht
+  /list                     Status-Übersicht der aktuellen Session
+  /sessions                 alle vorhandenen Sessions auflisten
   /gaps                     LLM-Lückenanalyse zwischen bestätigten Mails
   /summary                  narrative Zusammenfassung erzeugen
   /export                   Markdown + CSV + mails/ schreiben
@@ -485,8 +526,10 @@ Sonstiger freier Text       →  Frage an das LLM mit aktuellem Stand als Kontex
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Interaktiver Mail-Recherche-Agent (qmd + ollama).")
-    p.add_argument("-s", "--session", required=True,
-                   help="Session-Name (Pflicht; legt JSON in ~/.local/share/...).")
+    p.add_argument("-s", "--session",
+                   help="Session-Name. Pflicht außer bei --list-sessions.")
+    p.add_argument("--list-sessions", action="store_true",
+                   help="Vorhandene Sessions auflisten und beenden.")
     p.add_argument("-m", "--model", default=DEFAULT_MODEL)
     p.add_argument("-n", "--top-k", type=int, default=20,
                    help="qmd Top-N pro Suche (Default 20).")
@@ -495,6 +538,12 @@ def main() -> None:
     p.add_argument("-c", "--num-ctx", type=int,
                    default=int(os.environ.get("OLLAMA_NUM_CTX", "32768")))
     args = p.parse_args()
+
+    if args.list_sessions:
+        print_sessions()
+        return
+    if not args.session:
+        p.error("--session/-s ist Pflicht (außer mit --list-sessions).")
 
     state = load_session(args.session)
     if not state["case_description"]:
@@ -527,6 +576,11 @@ def main() -> None:
                 print(HELP); continue
             if line == "/list":
                 cmd_list(state); continue
+            if line == "/sessions":
+                print_sessions()
+                print(f"(Aktuell: {args.session}. Wechseln = /quit + neu starten "
+                      f"mit -s ANDERER_NAME.)")
+                continue
             if line.startswith("/case"):
                 rest = line[len("/case"):].strip()
                 if rest:

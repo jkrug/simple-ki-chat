@@ -4,10 +4,11 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+
+import qmd
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
@@ -26,32 +27,10 @@ SYSTEM_PROMPT = (
     "Liste am Ende die verwendeten Quellen (Dateinamen)."
 )
 
-URI_RE = re.compile(r"qmd://[^\s:]+\.md")
-
-
-def search(query: str, n: int) -> list[str]:
-    res = subprocess.run(
-        ["qmd", "query", "--files", "-n", str(n), query],
-        capture_output=True, text=True, check=True,
-    )
-    uris, seen = [], set()
-    for line in res.stdout.splitlines():
-        m = URI_RE.search(line.strip())
-        if m and m.group(0) not in seen:
-            seen.add(m.group(0))
-            uris.append(m.group(0))
-    return uris
-
-
-def fetch(uri: str, max_lines: int | None) -> str:
-    cmd = ["qmd", "get", uri]
-    if max_lines:
-        cmd += ["-l", str(max_lines)]
-    return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
-
-
 def build_context(uris: list[str], max_lines: int) -> str:
-    return "\n\n".join(f"=== {u} ===\n{fetch(u, max_lines)}" for u in uris)
+    return "\n\n".join(
+        f"=== {u} ===\n{qmd.fetch(u, max_lines=max_lines)}" for u in uris
+    )
 
 
 def chat(model: str, messages: list[dict], num_ctx: int) -> str:
@@ -140,7 +119,7 @@ def main() -> None:
 
     def turn(question: str) -> None:
         print(f"\n→ Suche Mails: {question!r}", file=sys.stderr)
-        hits = search(question, args.top_k)
+        hits = qmd.search(question, args.top_k)
         new = [u for u in hits if u not in loaded_uris]
         print(f"→ {len(hits)} Treffer, davon {len(new)} neu.", file=sys.stderr)
         for u in new:

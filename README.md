@@ -94,6 +94,10 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /list                     Status-Übersicht der aktuellen Session
 /sessions                 alle gespeicherten Sessions auflisten
 /gaps                     LLM analysiert zeitliche Lücken
+/devil                    Anwalt der Gegenseite: Schwachstellen + Such-Stichworte
+/context                  Kontext-Datei anzeigen
+/context edit             Kontext-Datei in $EDITOR öffnen
+/context <pfad.md>        anderen Pfad für Kontext-Datei setzen
 /summary                  narrative Zusammenfassung erzeugen
 /export                   schreibt Markdown + CSV + mails/-Ordner
 /case [<text>]            Fallbeschreibung anzeigen / setzen
@@ -131,6 +135,28 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
    - `mails/` — alle akzeptierten Threads als Volltext-Markdown
 5. **`/summary`** erzeugt zusätzlich `zusammenfassung.md` (narrative
    Phasen-Beschreibung, Lücken werden explizit benannt).
+
+### Kontext-Datei (Hintergrund-Briefing)
+
+Du kannst dem LLM ein **selbst geschriebenes Markdown** als Kontext
+beilegen — wer ist wer, Hintergrund, dein subjektiver Ablauf, worauf
+zu achten ist. Der Inhalt wird automatisch jedem LLM-Aufruf (Review,
+Suggest, Gaps, Devil, Summary, freier Chat) als „Hintergrund vom
+Mandanten" mitgegeben.
+
+- Default-Pfad: `<out_dir>/kontext.md` (also z. B.
+  `~/marmalade-fall/output/kontext.md`).
+- `/context edit` öffnet die Datei in `$EDITOR` (Fallback: `nano`/`vim`)
+  und legt bei Bedarf ein Skelett mit Sektionen an.
+- `/context <pfad>` setzt einen anderen Pfad (in der Session gespeichert).
+- `/context` allein zeigt Pfad + Vorschau.
+
+### `/devil` — Anwalt der Gegenseite
+
+Schickt die akzeptierte Timeline + Kontext-Datei mit der Aufgabe „spiele
+gegnerische Anwältin" ans LLM. Output: konkrete Schwachstellen und pro
+Punkt eine qmd-Stichwortsuche, die du gleich per `:1`, `:2`, … ausführen
+kannst, um Belege nachzulegen oder gezielt nach Munition zu suchen.
 
 ### Sessions
 

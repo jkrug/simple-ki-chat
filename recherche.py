@@ -9,6 +9,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -160,6 +161,78 @@ def save_session(state: dict) -> None:
     )
 
 
+# ───────────── Kontext-Datei ─────────────
+
+def context_path(state: dict, out_dir: str) -> Path:
+    """Pfad zur Kontext-Markdown-Datei. Default: <out_dir>/kontext.md."""
+    p = state.get("context_file") or ""
+    if p:
+        return Path(p).expanduser()
+    return Path(out_dir).expanduser() / "kontext.md"
+
+
+def load_context_text(state: dict, out_dir: str) -> str:
+    p = context_path(state, out_dir)
+    try:
+        return p.read_text()
+    except (OSError, FileNotFoundError):
+        return ""
+
+
+def context_block(state: dict, out_dir: str) -> str:
+    """Block für User-Prompts. Leer wenn keine Kontext-Datei vorhanden."""
+    text = load_context_text(state, out_dir).strip()
+    if not text:
+        return ""
+    return ("\n### Hintergrund vom Mandanten (kontextuelle Notizen, "
+            "Personen, subjektive Sicht — KEIN Mailinhalt):\n"
+            f"{text}\n")
+
+
+def cmd_context(state: dict, arg: str, out_dir: str) -> None:
+    arg = arg.strip()
+    p = context_path(state, out_dir)
+    if not arg:
+        if p.exists():
+            txt = p.read_text()
+            lines = txt.count("\n") + 1
+            print(f"Datei: {p}  ({len(txt)} Bytes, {lines} Zeilen)")
+            print("─" * 70)
+            preview = txt[:1500]
+            print(preview + ("\n…" if len(txt) > 1500 else ""))
+        else:
+            print(f"Noch keine Kontext-Datei. Default-Pfad: {p}\n"
+                  f"  /context edit          öffnet $EDITOR (oder nano/vim)\n"
+                  f"  /context <pfad.md>     wechselt auf eine andere Datei")
+        return
+    if arg == "edit":
+        editor = os.environ.get("EDITOR", "")
+        if not editor:
+            for cand in ("nano", "vim", "vi"):
+                if shutil.which(cand):
+                    editor = cand
+                    break
+        if not editor:
+            print("Kein $EDITOR gesetzt und nano/vim/vi nicht gefunden.")
+            return
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not p.exists():
+            p.write_text(
+                "# Fallkontext\n\n"
+                "## Wer ist wer\n\n"
+                "## Hintergrund\n\n"
+                "## Mein Ablauf in Gedanken\n\n"
+                "## Worauf soll geachtet werden\n\n"
+            )
+        subprocess.run([editor, str(p)])
+        return
+    new = Path(arg).expanduser()
+    state["context_file"] = str(new)
+    print(f"Kontext-Pfad gesetzt auf: {new}")
+    if not new.exists():
+        print("(Datei existiert noch nicht — anlegen mit /context edit.)")
+
+
 # ───────────── Candidates ─────────────
 
 def make_candidate(uri: str) -> dict:
@@ -249,7 +322,7 @@ def cmd_add(state: dict, arg: str) -> None:
           f"{len(uris) - new} bereits bekannt).")
 
 
-def cmd_suggest(state: dict, model: str) -> None:
+def cmd_suggest(state: dict, model: str, out_dir: str) -> None:
     accepted = [c for c in state["candidates"].values() if c["status"] == "accepted"]
     timeline = "\n".join(
         f"- {c['date_start']}: {c['subject']} — {c.get('summary', '')}"
@@ -257,7 +330,7 @@ def cmd_suggest(state: dict, model: str) -> None:
     ) or "(noch keine bestätigten Mails)"
     searches = "\n".join(f"- {s}" for s in state["executed_searches"]) or "(noch keine)"
     prompt = f"""Fall: {state['case_description']}
-
+{context_block(state, out_dir)}
 Bestätigte Mails (chronologisch):
 {timeline}
 
@@ -325,7 +398,8 @@ def cmd_reject(state: dict, pattern: str) -> None:
     print(f"✗ {len(matches)} Mail(s) auf 'rejected' gesetzt.")
 
 
-def cmd_review(state: dict, model: str, use_llm: bool = True) -> None:
+def cmd_review(state: dict, model: str, out_dir: str,
+               use_llm: bool = True) -> None:
     pending = [u for u, c in state["candidates"].items() if c["status"] == "pending"]
     if not pending:
         print("Keine Mails zum Review.")
@@ -353,7 +427,7 @@ Auszug:
 {c['body_excerpt']}
 
 Fall: {state['case_description']}
-
+{context_block(state, out_dir)}
 Bewerte Relevanz und formuliere – falls relevant – eine juristisch
 nüchterne Kernaussage (1 Satz, deutsch).
 JSON: {{"likely_relevant": true|false, "reasoning": "...", "summary": "..."}}"""
@@ -424,7 +498,7 @@ def cmd_list(state: dict) -> None:
             print(f"  {c['date_start'] or '???':11s}  {c['subject'][:60]}{extra}")
 
 
-def cmd_gaps(state: dict, model: str) -> None:
+def cmd_gaps(state: dict, model: str, out_dir: str) -> None:
     accepted = sorted(
         [c for c in state["candidates"].values() if c["status"] == "accepted"],
         key=lambda c: c["date_start"],
@@ -434,7 +508,9 @@ def cmd_gaps(state: dict, model: str) -> None:
         return
     timeline = "\n".join(f"- {c['date_start']}: {c['subject']} — {c['summary']}"
                         for c in accepted)
-    prompt = f"""Bestätigte Mails:
+    prompt = f"""Fall: {state['case_description']}
+{context_block(state, out_dir)}
+Bestätigte Mails:
 {timeline}
 
 Identifiziere zeitliche Lücken (>4 Wochen ohne Mails) oder thematische
@@ -522,7 +598,7 @@ def cmd_summary(state: dict, out_dir: str, model: str) -> None:
         for c in accepted
     )
     prompt = f"""Fall: {state['case_description']}
-
+{context_block(state, out_dir)}
 Zeitliche Abfolge:
 {timeline}
 
@@ -540,7 +616,8 @@ Keine Erfindungen — nur was aus den Mails ersichtlich ist."""
     print(f"\n✓ {out_path}")
 
 
-def cmd_freeform(state: dict, model: str, question: str, num_ctx: int) -> None:
+def cmd_freeform(state: dict, model: str, question: str, num_ctx: int,
+                 out_dir: str) -> None:
     accepted = sorted(
         [c for c in state["candidates"].values() if c["status"] == "accepted"],
         key=lambda c: c["date_start"],
@@ -550,9 +627,67 @@ def cmd_freeform(state: dict, model: str, question: str, num_ctx: int) -> None:
     chat_stream(model, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content":
-            f"Fall: {state['case_description']}\n\n"
-            f"Bestätigte Mails:\n{ctx}\n\nFrage: {question}"},
+            f"Fall: {state['case_description']}"
+            f"{context_block(state, out_dir)}"
+            f"\nBestätigte Mails:\n{ctx}\n\nFrage: {question}"},
     ], num_ctx=num_ctx)
+
+
+def cmd_devil(state: dict, model: str, out_dir: str) -> None:
+    """Anwalt der Gegenseite: Schwachstellen identifizieren + Such-Stichworte."""
+    accepted = sorted(
+        [c for c in state["candidates"].values() if c["status"] == "accepted"],
+        key=lambda c: c["date_start"],
+    )
+    if not accepted:
+        print("Keine akzeptierten Mails — Devil's Advocate braucht Material.")
+        return
+    timeline = "\n".join(
+        f"- {c['date_start']} — {c['subject']} "
+        f"({', '.join(c['participants'][:2])}): {c['summary']}"
+        for c in accepted
+    )
+    prompt = f"""Fall: {state['case_description']}
+{context_block(state, out_dir)}
+Bisheriger Sachverhalt aus Sicht des Mandanten (chronologisch):
+{timeline}
+
+Du bist Anwalt der Gegenseite. Identifiziere die Schwachstellen, an
+denen die Gegenpartei Joschas Position angreifen wird:
+- Inkonsistenzen oder zeitliche Lücken
+- Aussagen ohne Mail-Beleg
+- Mehrdeutige Formulierungen
+- Mögliche alternative Lesarten der Vorgänge
+
+Pro Schwachstelle: kurze Begründung + KONKRETE qmd-Stichwortsuche
+(2-5 deutsche Wörter, KEINE Boolean-Operatoren, KEINE Quotes, KEINE
+Datumsbereiche), mit der Joscha gezielt nach Belegen suchen kann.
+
+JSON: {{"summary": "...", "weaknesses": [
+  {{"point": "...", "explanation": "...", "search": "..."}}, ...
+]}}"""
+    try:
+        data = json.loads(chat(model, [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ], json_mode=True))
+    except (json.JSONDecodeError, urllib.error.URLError) as e:
+        print(f"LLM-Fehler: {e}")
+        return
+    print(f"\n😈  Devil's Advocate:\n{data.get('summary', '')}\n")
+    suggestions: list[str] = []
+    for i, w in enumerate(data.get("weaknesses", []), 1):
+        print(f"[{i}] {w.get('point', '')}")
+        if w.get("explanation"):
+            print(f"    {w['explanation']}")
+        s = w.get("search", "").strip()
+        if s:
+            print(f"    → Suche: {s}")
+            suggestions.append(s)
+        print()
+    if suggestions:
+        state["last_suggestions"] = suggestions
+        print("Mit  :1  :2  …  direkt ausführen.")
 
 
 SEARCH_INTENT_RE = re.compile(
@@ -574,6 +709,8 @@ Befehle:
   /list                     Status-Übersicht der aktuellen Session
   /sessions                 alle vorhandenen Sessions auflisten
   /gaps                     LLM-Lückenanalyse zwischen bestätigten Mails
+  /devil                    Anwalt der Gegenseite — Schwachstellen + Suchen
+  /context [<pfad>|edit]    Hintergrund-Markdown anzeigen / setzen / öffnen
   /summary                  narrative Zusammenfassung erzeugen
   /export                   Markdown + CSV + mails/ schreiben
   /case [<text>]            Fallbeschreibung anzeigen / setzen
@@ -661,7 +798,13 @@ def main() -> None:
                 cmd_add(state, line[len("/add"):].strip())
                 save_session(state); continue
             if line == "/suggest":
-                cmd_suggest(state, args.model)
+                cmd_suggest(state, args.model, args.out)
+                save_session(state); continue
+            if line == "/devil":
+                cmd_devil(state, args.model, args.out)
+                save_session(state); continue
+            if line.startswith("/context"):
+                cmd_context(state, line[len("/context"):].strip(), args.out)
                 save_session(state); continue
             if line.startswith(":") and line[1:].isdigit():
                 idx = int(line[1:]) - 1
@@ -673,14 +816,14 @@ def main() -> None:
                     print("Ungültige Nummer.")
                 continue
             if line == "/review":
-                cmd_review(state, args.model); continue
+                cmd_review(state, args.model, args.out); continue
             if line in {"/review fast", "/review-fast"}:
-                cmd_review(state, args.model, use_llm=False); continue
+                cmd_review(state, args.model, args.out, use_llm=False); continue
             if line.startswith("/reject"):
                 cmd_reject(state, line[len("/reject"):].strip())
                 save_session(state); continue
             if line == "/gaps":
-                cmd_gaps(state, args.model); continue
+                cmd_gaps(state, args.model, args.out); continue
             if line == "/summary":
                 cmd_summary(state, args.out, args.model); continue
             if line == "/export":
@@ -719,7 +862,7 @@ def main() -> None:
                 cmd_search(state, m.group(1).strip(), args.top_k)
                 save_session(state)
                 continue
-            cmd_freeform(state, args.model, line, args.num_ctx)
+            cmd_freeform(state, args.model, line, args.num_ctx, args.out)
         except urllib.error.URLError as e:
             print(f"Verbindung zu ollama fehlgeschlagen: {e}", file=sys.stderr)
 

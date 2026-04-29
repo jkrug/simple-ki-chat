@@ -87,7 +87,10 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /add @<datei>             Zeilen aus Datei einlesen, qmd://…-URIs extrahieren
 /suggest                  LLM schlägt 3-5 Suchanfragen vor
 :1  :2  …                 Vorschlag Nr. N direkt ausführen
-/review                   pending-Mails durchgehen
+/review                   pending-Mails durchgehen (mit LLM-Hypothese)
+/review fast              dito ohne LLM — nur Frontmatter+Body, schnell
+/reject <pattern>         Bulk-Reject pending Mails mit Pattern in
+                          Betreff/Teilnehmer (zeigt Treffer + bestätigen)
 /list                     Status-Übersicht der aktuellen Session
 /sessions                 alle gespeicherten Sessions auflisten
 /gaps                     LLM analysiert zeitliche Lücken

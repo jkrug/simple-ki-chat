@@ -282,7 +282,42 @@ Antworte als JSON: {{"reasoning": "...", "suggestions": ["...", ...]}}"""
     state["last_suggestions"] = sugg
 
 
-def cmd_review(state: dict, model: str) -> None:
+def cmd_reject(state: dict, pattern: str) -> None:
+    """Bulk-Reject aller pending Mails, deren Betreff oder Teilnehmer
+    den Pattern (case-insensitive Substring) enthalten."""
+    if not pattern:
+        print("Usage: /reject <pattern>   (matcht Betreff und Teilnehmer)")
+        return
+    pat = pattern.lower()
+    matches = []
+    for c in state["candidates"].values():
+        if c["status"] != "pending":
+            continue
+        haystack = (c["subject"] + " " + " ".join(c["participants"])).lower()
+        if pat in haystack:
+            matches.append(c)
+    if not matches:
+        print(f"Keine pending Mail matcht {pattern!r}.")
+        return
+    print(f"\n{len(matches)} pending Mail(s) matchen {pattern!r}:")
+    for c in sorted(matches, key=lambda x: x["date_start"]):
+        parts = ", ".join(c["participants"][:2])
+        print(f"  {c['date_start'] or '???':11s}  {c['subject'][:55]:<55s}  {parts}")
+    try:
+        ans = input(f"\nAlle {len(matches)} aussortieren? [j/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if ans not in {"j", "ja", "y", "yes"}:
+        print("Abgebrochen.")
+        return
+    for c in matches:
+        c["status"] = "rejected"
+        c["rejection_reason"] = f"bulk-reject: {pattern}"
+    print(f"✗ {len(matches)} Mail(s) auf 'rejected' gesetzt.")
+
+
+def cmd_review(state: dict, model: str, use_llm: bool = True) -> None:
     pending = [u for u, c in state["candidates"].items() if c["status"] == "pending"]
     if not pending:
         print("Keine Mails zum Review.")
@@ -299,7 +334,9 @@ def cmd_review(state: dict, model: str) -> None:
         print(f"   {', '.join(c['participants'][:3])}")
         print(f"   {uri}")
 
-        prompt = f"""Mail-Frontmatter:
+        llm = {"likely_relevant": None, "reasoning": "", "summary": ""}
+        if use_llm:
+            prompt = f"""Mail-Frontmatter:
 - Betreff: {c['subject']}
 - Datum: {c['date_start']}
 - Teilnehmer: {', '.join(c['participants'])}
@@ -312,27 +349,28 @@ Fall: {state['case_description']}
 Bewerte Relevanz und formuliere – falls relevant – eine juristisch
 nüchterne Kernaussage (1 Satz, deutsch).
 JSON: {{"likely_relevant": true|false, "reasoning": "...", "summary": "..."}}"""
-        try:
-            llm = json.loads(chat(model, [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ], json_mode=True))
-        except KeyboardInterrupt:
-            save_session(state)
-            print("\nReview abgebrochen (während LLM-Anfrage). "
-                  "Session gespeichert, Thread bleibt pending.")
-            return
-        except (json.JSONDecodeError, urllib.error.URLError) as e:
-            print(f"   (LLM-Fehler: {e})")
-            llm = {"likely_relevant": None, "reasoning": "", "summary": ""}
+            try:
+                llm = json.loads(chat(model, [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ], json_mode=True))
+            except KeyboardInterrupt:
+                save_session(state)
+                print("\nReview abgebrochen (während LLM-Anfrage). "
+                      "Session gespeichert, Thread bleibt pending.")
+                return
+            except (json.JSONDecodeError, urllib.error.URLError) as e:
+                print(f"   (LLM-Fehler: {e})")
 
-        verdict = ("wahrscheinlich RELEVANT" if llm.get("likely_relevant")
-                   else "wahrscheinlich nicht relevant")
-        print(f"\n💡 {verdict}")
-        if llm.get("reasoning"):
-            print(f"   {llm['reasoning']}")
-        if llm.get("summary"):
-            print(f"   Kernaussage: {llm['summary']}")
+            verdict = ("wahrscheinlich RELEVANT" if llm.get("likely_relevant")
+                       else "wahrscheinlich nicht relevant")
+            print(f"\n💡 {verdict}")
+            if llm.get("reasoning"):
+                print(f"   {llm['reasoning']}")
+            if llm.get("summary"):
+                print(f"   Kernaussage: {llm['summary']}")
+        else:
+            print(f"\n   {c['body_excerpt'][:600]}…")
 
         while True:
             try:
@@ -512,6 +550,9 @@ Befehle:
   /suggest                  LLM schlägt 3-5 Suchanfragen vor
   :1  :2  …                 letzten Vorschlag Nr. N direkt ausführen
   /review                   durch pending-Mails iterieren (a/r/s/b/q)
+  /review fast              dito, aber ohne LLM-Hypothese (manuell, schnell)
+  /reject <pattern>         alle pending mit Pattern in Betreff/Teilnehmer
+                            bulk-aussortieren (mit Bestätigung)
   /list                     Status-Übersicht der aktuellen Session
   /sessions                 alle vorhandenen Sessions auflisten
   /gaps                     LLM-Lückenanalyse zwischen bestätigten Mails
@@ -615,6 +656,11 @@ def main() -> None:
                 continue
             if line == "/review":
                 cmd_review(state, args.model); continue
+            if line in {"/review fast", "/review-fast"}:
+                cmd_review(state, args.model, use_llm=False); continue
+            if line.startswith("/reject"):
+                cmd_reject(state, line[len("/reject"):].strip())
+                save_session(state); continue
             if line == "/gaps":
                 cmd_gaps(state, args.model); continue
             if line == "/summary":

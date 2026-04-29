@@ -317,6 +317,11 @@ JSON: {{"likely_relevant": true|false, "reasoning": "...", "summary": "..."}}"""
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ], json_mode=True))
+        except KeyboardInterrupt:
+            save_session(state)
+            print("\nReview abgebrochen (während LLM-Anfrage). "
+                  "Session gespeichert, Thread bleibt pending.")
+            return
         except (json.JSONDecodeError, urllib.error.URLError) as e:
             print(f"   (LLM-Fehler: {e})")
             llm = {"likely_relevant": None, "reasoning": "", "summary": ""}

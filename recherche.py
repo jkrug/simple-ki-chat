@@ -170,6 +170,45 @@ def cmd_search(state: dict, query: str, top_k: int) -> None:
     print(f"   {len(uris)} Treffer ({new} neu, {len(uris) - new} bekannt).")
 
 
+def cmd_add(state: dict, arg: str) -> None:
+    """URIs manuell hinzufügen. Format:
+        /add qmd://threads/a.md qmd://threads/b.md
+        /add @/pfad/zu/datei.txt    (jede Zeile darf eine URI enthalten)
+    """
+    if not arg:
+        print("Usage: /add <uri> [<uri> ...]   oder   /add @datei")
+        return
+    raw_lines: list[str] = []
+    for tok in arg.split():
+        if tok.startswith("@"):
+            path = Path(tok[1:]).expanduser()
+            if not path.exists():
+                print(f"Datei nicht gefunden: {path}")
+                continue
+            raw_lines.extend(path.read_text().splitlines())
+        else:
+            raw_lines.append(tok)
+    uris, seen = [], set()
+    for line in raw_lines:
+        m = qmd.URI_RE.search(line)
+        if m and m.group(0) not in seen:
+            seen.add(m.group(0))
+            uris.append(m.group(0))
+    if not uris:
+        print("Keine qmd://…-URIs erkannt.")
+        return
+    new = 0
+    for u in uris:
+        if u not in state["candidates"]:
+            try:
+                state["candidates"][u] = make_candidate(u)
+                new += 1
+            except subprocess.CalledProcessError as e:
+                print(f"qmd get fehlgeschlagen für {u}: {e.stderr}")
+    print(f"   {len(uris)} URIs verarbeitet ({new} neu, "
+          f"{len(uris) - new} bereits bekannt).")
+
+
 def cmd_suggest(state: dict, model: str) -> None:
     accepted = [c for c in state["candidates"].values() if c["status"] == "accepted"]
     timeline = "\n".join(
@@ -415,9 +454,16 @@ def cmd_freeform(state: dict, model: str, question: str, num_ctx: int) -> None:
     ], num_ctx=num_ctx)
 
 
+SEARCH_INTENT_RE = re.compile(
+    r"^\s*(?:suche?|finde?|search|find)(?:\s+(?:nach|mal))?\s+(.+?)\s*[.!?]?$",
+    re.IGNORECASE,
+)
+
+
 HELP = """
 Befehle:
   /search <query>           qmd-Suche, fügt Treffer als 'pending' hinzu
+  /add <uri> [<uri>...]     URIs direkt aufnehmen (oder /add @datei.txt)
   /suggest                  LLM schlägt 3-5 Suchanfragen vor
   :1  :2  …                 letzten Vorschlag Nr. N direkt ausführen
   /review                   durch pending-Mails iterieren (a/r/s/b/q)
@@ -431,7 +477,8 @@ Befehle:
   /help                     diese Hilfe
   /quit                     Beenden (Session ist auto-gespeichert)
 
-Freier Text  →  Frage an das LLM mit aktuellem Stand als Kontext.
+"Suche nach X" / "Finde X"  →  qmd-Suche (wie /search X).
+Sonstiger freier Text       →  Frage an das LLM mit aktuellem Stand als Kontext.
 """
 
 
@@ -492,6 +539,9 @@ def main() -> None:
             if line.startswith("/search"):
                 cmd_search(state, line[len("/search"):].strip(), args.top_k)
                 save_session(state); continue
+            if line.startswith("/add"):
+                cmd_add(state, line[len("/add"):].strip())
+                save_session(state); continue
             if line == "/suggest":
                 cmd_suggest(state, args.model)
                 save_session(state); continue
@@ -540,6 +590,11 @@ def main() -> None:
                         break
                 else:
                     print("Kein Treffer.")
+                continue
+            m = SEARCH_INTENT_RE.match(line)
+            if m:
+                cmd_search(state, m.group(1).strip(), args.top_k)
+                save_session(state)
                 continue
             cmd_freeform(state, args.model, line, args.num_ctx)
         except urllib.error.URLError as e:

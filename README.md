@@ -83,6 +83,8 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 
 ```
 /search <query>           qmd-Suche, fügt Treffer als 'pending' hinzu
+/add <uri> [<uri> ...]    URIs direkt aufnehmen (z. B. aus eigenen qmd-Läufen)
+/add @<datei>             Zeilen aus Datei einlesen, qmd://…-URIs extrahieren
 /suggest                  LLM schlägt 3-5 Suchanfragen vor
 :1  :2  …                 Vorschlag Nr. N direkt ausführen
 /review                   pending-Mails durchgehen
@@ -97,8 +99,13 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /quit                     Beenden (Session ist auto-gespeichert)
 ```
 
-Freier Text ohne `/` wird als Frage an das LLM geschickt — mit der
-Fallbeschreibung und allen bestätigten Mail-Kernaussagen als Kontext.
+**Natürlichsprachliche Eingabe:**
+
+- `Suche nach <begriff>` / `Finde <begriff>` — wird als qmd-Suche ausgeführt
+  (Äquivalent zu `/search <begriff>`). Erkannt werden auch „such mal nach …",
+  „find …" usw.
+- Alles andere ohne `/` geht als Frage an das LLM — mit Fallbeschreibung und
+  allen bestätigten Mail-Kernaussagen als Kontext.
 
 ### Workflow
 

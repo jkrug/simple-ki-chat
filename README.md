@@ -102,8 +102,9 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
                           gestützt / widersprochen / unbelegt + Such-Stichworte
 /summary                  narrative Zusammenfassung erzeugen
 /export                   roher Dump (alle accepted): MD + CSV + mails/
-/akte                     kuratierter Gerichts-Export, validiert gegen
+/dossier                  kuratierter Gerichts-Export, validiert gegen
                           kontext.md, interne Korrespondenz gefiltert
+                          (Alias: /akte)
 /case [<text>]            Fallbeschreibung anzeigen / setzen
 /edit <subject-fragment>  Kernaussage einer akzept. Mail ändern
 /undo <subject-fragment>  Mail zurück auf 'pending'
@@ -155,7 +156,7 @@ Mandanten" mitgegeben.
 - `/context <pfad>` setzt einen anderen Pfad (in der Session gespeichert).
 - `/context` allein zeigt Pfad + Vorschau.
 
-### `/akte` — kuratierter Gerichts-Export
+### `/dossier` (Alias `/akte`) — kuratierter Gerichts-Export
 
 Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
 `kontext.md` einen strukturierten, gerichtstauglichen Output:

@@ -1098,9 +1098,10 @@ Befehle:
   /validate-context         prüft kontext.md gegen akzept. Mails (Konflikte!)
   /summary                  narrative Zusammenfassung erzeugen
   /export                   roher Dump (alle accepted) → Markdown+CSV+mails/
-  /akte                     kuratierter Gerichts-Export: validiert Mails
+  /dossier                  kuratierter Gerichts-Export: validiert Mails
                             gegen kontext.md, filtert interne Korrespondenz
                             (laut '## Interne Kontakte' in kontext.md) raus
+                            (Alias: /akte)
   /case [<text>]            Fallbeschreibung anzeigen / setzen
   /edit <subject-fragment>  Kernaussage einer akzept. Mail ändern
   /undo <subject-fragment>  Mail zurück auf 'pending'
@@ -1219,7 +1220,7 @@ def main() -> None:
                 cmd_summary(state, args.out, args.model); continue
             if line == "/export":
                 cmd_export(state, args.out); continue
-            if line == "/akte":
+            if line in {"/dossier", "/akte"}:
                 cmd_akte(state, args.model, args.out); continue
             if line.startswith("/edit"):
                 frag = line[len("/edit"):].strip().lower()

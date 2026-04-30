@@ -98,6 +98,8 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /context                  Kontext-Datei anzeigen
 /context edit             Kontext-Datei in $EDITOR öffnen
 /context <pfad.md>        anderen Pfad für Kontext-Datei setzen
+/validate-context         prüft kontext.md gegen die akzeptierten Mails:
+                          gestützt / widersprochen / unbelegt + Such-Stichworte
 /summary                  narrative Zusammenfassung erzeugen
 /export                   schreibt Markdown + CSV + mails/-Ordner
 /case [<text>]            Fallbeschreibung anzeigen / setzen
@@ -150,6 +152,20 @@ Mandanten" mitgegeben.
   und legt bei Bedarf ein Skelett mit Sektionen an.
 - `/context <pfad>` setzt einen anderen Pfad (in der Session gespeichert).
 - `/context` allein zeigt Pfad + Vorschau.
+
+### `/validate-context` — Erinnerung gegen Mails prüfen
+
+Nach Jahren stimmt die Erinnerung selten mit der Aktenlage überein. Dieser
+Befehl schickt deine `kontext.md` zusammen mit der Timeline der akzeptierten
+Mails ans LLM und teilt jede prüfbare Aussage in drei Töpfe:
+
+- **✓ gestützt** — durch eine konkrete Mail belegt (Datum + Betreff)
+- **✗ widersprochen** — Mail sagt etwas anderes als die Erinnerung
+- **? unbelegt** — keine Mail-Spur, mit Such-Vorschlag zum Nachhaken
+
+Die Such-Vorschläge landen wieder als nummerierte Liste, ausführbar per
+`:1`, `:2`, … Außerdem ist im System-Prompt verankert: bei Konflikt
+zwischen Erinnerung und Mail folgt das LLM grundsätzlich der Mail.
 
 ### `/devil` — Anwalt der Gegenseite
 

@@ -40,7 +40,11 @@ Wichtig:
 - Wenn ein Feld unklar ist: leerlassen oder "?". Lieber nachfragen als
   raten.
 - Antworte präzise auf Deutsch, sachlich, juristisch nüchtern.
-- Wenn JSON gefordert ist: NUR valides JSON, keine Einleitung."""
+- Wenn JSON gefordert ist: NUR valides JSON, keine Einleitung.
+- Hintergrund-Notizen vom Mandanten sind dessen SUBJEKTIVE ERINNERUNG
+  (z. T. Jahre alt) und können fehlerhaft sein. Wenn eine Mail dem
+  widerspricht, folge der Mail und weise auf den Widerspruch hin.
+  Mail-Belege schlagen Erinnerung."""
 
 
 # ───────────── Ollama ─────────────
@@ -633,6 +637,96 @@ def cmd_freeform(state: dict, model: str, question: str, num_ctx: int,
     ], num_ctx=num_ctx)
 
 
+def cmd_validate_context(state: dict, model: str, out_dir: str) -> None:
+    """Prüft kontext.md gegen die akzeptierte Timeline."""
+    ctx_text = load_context_text(state, out_dir).strip()
+    if not ctx_text:
+        print("Keine Kontext-Datei vorhanden — nichts zu validieren.\n"
+              "Mit /context edit anlegen.")
+        return
+    accepted = sorted(
+        [c for c in state["candidates"].values() if c["status"] == "accepted"],
+        key=lambda c: c["date_start"],
+    )
+    if not accepted:
+        print("Noch keine akzeptierten Mails — Validierung braucht Belegmaterial.")
+        return
+    timeline = "\n".join(
+        f"- {c['date_start']} — {c['subject']} "
+        f"({', '.join(c['participants'][:2])}): {c['summary']}"
+        for c in accepted
+    )
+    prompt = f"""Fall: {state['case_description']}
+
+Subjektive Erinnerung des Mandanten (vor Jahren) — kann fehlerhaft sein:
+---
+{ctx_text}
+---
+
+Belegte Mails aus dem Mailarchiv (chronologisch, mit Kernaussagen):
+{timeline}
+
+Prüfe Punkt für Punkt aus der Erinnerung gegen die Mails. Ordne jede
+prüfbare Aussage in genau eine der drei Kategorien:
+
+- "supported": Aussage wird von mindestens einer Mail gestützt
+  (nenne im "evidence"-Feld Datum + Betreff der Mail)
+- "contradicted": eine Mail widerspricht der Erinnerung
+  (nenne im "issue"-Feld den Widerspruch + Datum + Betreff;
+   im "search"-Feld eine 2-5-Wort-Stichwortsuche zur Vertiefung)
+- "unsupported": Aussage hat keinen Mail-Beleg
+  (im "search"-Feld eine 2-5-Wort-Stichwortsuche, mit der man Belege
+   versuchen könnte; KEINE Boolean-Operatoren, keine Datumsbereiche)
+
+Vage Hintergrundaussagen ("X war wichtig", "Y war kompliziert) ignoriere.
+Konzentriere dich auf konkrete Behauptungen (Daten, Handlungen, Aussagen).
+
+JSON: {{
+  "supported":     [{{"claim": "...", "evidence": "..."}}],
+  "contradicted":  [{{"claim": "...", "issue": "...", "search": "..."}}],
+  "unsupported":   [{{"claim": "...", "search": "..."}}]
+}}"""
+    try:
+        data = json.loads(chat(model, [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ], json_mode=True))
+    except (json.JSONDecodeError, urllib.error.URLError) as e:
+        print(f"LLM-Fehler: {e}")
+        return
+
+    suggestions: list[str] = []
+    sup = data.get("supported", [])
+    con = data.get("contradicted", [])
+    uns = data.get("unsupported", [])
+
+    print(f"\n✓ Gestützt durch Mails ({len(sup)}):")
+    for s in sup:
+        print(f"  • {s.get('claim', '')}")
+        if s.get("evidence"):
+            print(f"      → Beleg: {s['evidence']}")
+
+    print(f"\n✗ Widerspruch zwischen Erinnerung und Mails ({len(con)}):")
+    for s in con:
+        print(f"  • {s.get('claim', '')}")
+        if s.get("issue"):
+            print(f"      → Konflikt: {s['issue']}")
+        if s.get("search"):
+            print(f"      → Suche: {s['search']}")
+            suggestions.append(s["search"])
+
+    print(f"\n? Unbelegt — keine Mails dazu ({len(uns)}):")
+    for s in uns:
+        print(f"  • {s.get('claim', '')}")
+        if s.get("search"):
+            print(f"      → Suche: {s['search']}")
+            suggestions.append(s["search"])
+
+    if suggestions:
+        state["last_suggestions"] = suggestions
+        print(f"\n→ {len(suggestions)} Such-Vorschläge: mit :1 :2 … direkt ausführen.")
+
+
 def cmd_devil(state: dict, model: str, out_dir: str) -> None:
     """Anwalt der Gegenseite: Schwachstellen identifizieren + Such-Stichworte."""
     accepted = sorted(
@@ -711,6 +805,7 @@ Befehle:
   /gaps                     LLM-Lückenanalyse zwischen bestätigten Mails
   /devil                    Anwalt der Gegenseite — Schwachstellen + Suchen
   /context [<pfad>|edit]    Hintergrund-Markdown anzeigen / setzen / öffnen
+  /validate-context         prüft kontext.md gegen akzept. Mails (Konflikte!)
   /summary                  narrative Zusammenfassung erzeugen
   /export                   Markdown + CSV + mails/ schreiben
   /case [<text>]            Fallbeschreibung anzeigen / setzen
@@ -802,6 +897,9 @@ def main() -> None:
                 save_session(state); continue
             if line == "/devil":
                 cmd_devil(state, args.model, args.out)
+                save_session(state); continue
+            if line in {"/validate-context", "/validate"}:
+                cmd_validate_context(state, args.model, args.out)
                 save_session(state); continue
             if line.startswith("/context"):
                 cmd_context(state, line[len("/context"):].strip(), args.out)

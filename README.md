@@ -193,12 +193,18 @@ Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
    Mails werden als „intern" klassifiziert, wenn ein Pattern als Substring
    in den Teilnehmern oder im Betreff auftaucht (case-insensitive).
 
-2. **Validiert jede externe Mail gegen die Erinnerung.** Pro Mail markiert
-   das LLM:
+2. **Validiert jede externe Mail gegen die Erinnerung und sortiert
+   thematisch nochmal nach.** Pro Mail markiert das LLM:
    - ✓ **bestätigt** — eine Aussage der Erinnerung wird durch die Mail belegt
    - ➕ **erweitert** — die Mail präzisiert/ergänzt die Erinnerung
    - ✗ **widerspricht** — Mail steht im Widerspruch zur Erinnerung
-   - — **neu** — Mail führt einen Punkt ein, der in der Erinnerung fehlt
+   - — **neu** — Mail führt einen für den Fall relevanten Punkt ein,
+     der in der Erinnerung fehlt
+   - **off_topic** — themenfremd (anderes Projekt mit denselben Personen,
+     Newsletter, Routine-Korrespondenz). Diese Mails werden **nicht** in
+     die Akte aufgenommen, sondern am Ende der Konsole mit Begründung
+     gelistet — du entscheidest dann mit `/reject` (endgültig raus) oder
+     ignorierst die Meldung (sie bleiben accepted).
 
 3. **Räumt vorher auf** — alle `akte_*`-Dateien und der Inhalt von
    `akte_mails/` werden vor dem Schreiben gelöscht. Keine Altlasten.

@@ -805,11 +805,18 @@ EREIGNIS-FORMULIERUNG (Feld "event"):
 - Falls eine Verpflichtung, Frist, Forderung, Zusage oder Ablehnung
   ausgesprochen wurde: das ausdrücklich nennen.
 
-KLASSIFIKATION (Feld "classification") — Beziehung zur Erinnerung:
+KLASSIFIKATION (Feld "classification") — Bezug zum Fall / zur Erinnerung:
 - "confirmed":   bestätigt eine konkrete Aussage der Erinnerung
 - "extends":     erweitert/präzisiert die Erinnerung
 - "contradicts": widerspricht einer Aussage der Erinnerung
-- "new":         Punkt, der in der Erinnerung gar nicht vorkommt
+- "new":         für den Fall relevant, in der Erinnerung nicht erwähnt
+- "off_topic":   themenfremd — Mail betrifft offensichtlich ein anderes
+                 Projekt/Thema, auch wenn dieselben Personen beteiligt sind
+                 (z. B. Newsletter, andere Vorhaben, Routine-Korrespondenz
+                 zu fremden Themen). Bei off_topic begründe knapp im
+                 "event"-Feld, warum (z. B. "anderer Projektkontext:
+                 Dialogprinzipien"). Diese Mails werden NICHT in die
+                 Akte aufgenommen.
 
 Wenn die Mail eine Aussage der Erinnerung direkt belegt/widerlegt,
 nenne den Bezug knapp im Feld "context_reference" (sonst leer).
@@ -838,6 +845,21 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
 
     validations.sort(key=lambda v: (v[1].get("event_date") or v[0]["date_start"]))
 
+    # Themenfremde Mails (off_topic) werden NICHT in die Akte uebernommen,
+    # sondern am Ende der Konsolenausgabe gelistet, damit der User entscheiden
+    # kann (per /reject endgueltig oder bei Bedarf naechsten /dossier abwarten).
+    off_topic_validations = [v for v in validations
+                             if v[1].get("classification") == "off_topic"]
+    relevant_validations = [v for v in validations
+                            if v[1].get("classification") != "off_topic"]
+    if not relevant_validations:
+        print("\n⚠  Alle Mails wurden als themenfremd klassifiziert. "
+              "Akte wäre leer — Abbruch.")
+        for c, llm in off_topic_validations:
+            print(f"   ✗ {c['date_start']} — {c['subject'][:55]}: "
+                  f"{llm.get('event', '')}")
+        return
+
     if not validations:
         print("Keine validierten Mails. Abbruch.")
         return
@@ -847,7 +869,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
 
     md = ["# Akte: Zeitlicher Ablauf", "",
           f"_Stand: {datetime.now().strftime('%Y-%m-%d')}, "
-          f"{len(validations)} externe Mail(s) als Belege_", "",
+          f"{len(relevant_validations)} externe Mail(s) als Belege_", "",
           "**Bezug zur Erinnerung des Mandanten:** "
           "✓ bestätigt &nbsp; + erweitert &nbsp; ✗ widerspricht &nbsp; — neu",
           "",
@@ -856,7 +878,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
           "",
           "| Datum | Eingang | Beteiligte | Ereignis | Bezug | Anmerkung | Beleg |",
           "|-------|---------|------------|----------|:----:|-----------|-------|"]
-    for c, llm in validations:
+    for c, llm in relevant_validations:
         parts = "; ".join(c["participants"][:3])
         cls = llm.get("classification", "?")
         mark = CLASS_MARK.get(cls, "?")
@@ -876,7 +898,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
         w = csv.writer(f)
         w.writerow(["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
                     "Bezug", "Kontext-Verweis", "Anmerkung", "Beleg"])
-        for c, llm in validations:
+        for c, llm in relevant_validations:
             ev_date = llm.get("event_date") or c["date_start"]
             sent_date = c["date_start"] if c["date_start"] != ev_date else ""
             w.writerow([
@@ -890,7 +912,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
                 Path(c["uri"]).name,
             ])
 
-    for c, _ in validations:
+    for c, _ in relevant_validations:
         body = qmd.fetch(c["uri"], full=True)
         (mails_dir / Path(c["uri"]).name).write_text(body)
 
@@ -926,7 +948,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
             base += f"\n  Klärung des Mandanten: {note}"
         return base
 
-    timeline = "\n".join(_line(c, llm) for c, llm in validations)
+    timeline = "\n".join(_line(c, llm) for c, llm in relevant_validations)
 
     extra_resolutions = state.get("context_resolutions") or []
     extra_block = ""
@@ -1006,7 +1028,7 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
 
     xlsx_path = dossier_dir / "zeitlicher_ablauf.xlsx"
     if HAVE_OPENPYXL:
-        write_xlsx(xlsx_path, validations)
+        write_xlsx(xlsx_path, relevant_validations)
     else:
         print("⚠  openpyxl fehlt — keine .xlsx-Datei. "
               "Installation: pip3 install openpyxl")
@@ -1025,14 +1047,14 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
     print(f"   ✓ zusammenfassung.md")
     if docx_ok:
         print(f"   ✓ zusammenfassung.docx")
-    print(f"   ✓ mails/  ({len(validations)} Belege)")
+    print(f"   ✓ mails/  ({len(relevant_validations)} Belege)")
     if internal:
         print(f"\n⊘ {intern_path}")
         print(f"   (NUR für dich — {len(internal)} interne Mails aussortiert; "
               f"liegt bewusst AUSSERHALB von dossier/, damit es beim Zippen "
               f"nicht mit reingeht)")
 
-    open_conflicts = [(c, llm) for c, llm in validations
+    open_conflicts = [(c, llm) for c, llm in relevant_validations
                       if llm.get("classification") == "contradicts"
                       and not (c.get("resolution_note") or "").strip()]
     if open_conflicts:
@@ -1055,6 +1077,20 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
         print("\nℹ  Tipp: /validate-context prüft auch die Gegenrichtung — "
               "welche Punkte deiner Erinnerung von keiner Mail belegt sind. "
               "Lauf das vor /dossier, dann erscheinen sie in der Zusammenfassung.")
+
+    if off_topic_validations:
+        print(f"\n💡 {len(off_topic_validations)} Mail(s) als möglicherweise "
+              f"THEMENFREMD eingestuft und NICHT in die Akte aufgenommen:")
+        for c, llm in off_topic_validations:
+            print(f"   • {c['date_start']} — {c['subject'][:55]}")
+            grund = (llm.get('event') or '').strip()
+            if grund:
+                print(f"     Grund: {grund}")
+            print(f"     Datei: {Path(c['uri']).name}")
+        print("\n   • Soll eine doch in die Akte? Nichts tun — sie bleibt "
+              "accepted und wird beim nächsten /dossier neu bewertet.")
+        print("   • Soll sie endgültig raus? /reject <fragment> oder "
+              "/undo <fragment>.")
 
 
 def cmd_export(state: dict, out_dir: str) -> None:

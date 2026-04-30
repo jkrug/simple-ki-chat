@@ -643,20 +643,21 @@ def write_xlsx(path: Path, validations: list[tuple[dict, dict]]) -> None:
     wb.save(path)
 
 
-def md_to_docx(md_path: Path, docx_path: Path) -> bool:
+def md_to_docx(md_path: Path, docx_path: Path, *,
+               with_toc: bool = False, fmt: str = "gfm") -> bool:
     """md -> docx via pandoc. Liefert True bei Erfolg, False sonst."""
     if not shutil.which("pandoc"):
         return False
+    cmd = ["pandoc", "-f", fmt, "--standalone",
+           str(md_path), "-o", str(docx_path)]
+    if with_toc:
+        cmd[3:3] = ["--toc", "--toc-depth=2"]
     try:
-        subprocess.run(
-            ["pandoc", "-f", "gfm", "--standalone",
-             "--toc", "--toc-depth=2",
-             str(md_path), "-o", str(docx_path)],
-            check=True, capture_output=True,
-        )
+        subprocess.run(cmd, check=True, capture_output=True)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"      pandoc-Fehler: {e.stderr.decode(errors='ignore')}")
+        print(f"      pandoc-Fehler ({md_path.name}): "
+              f"{e.stderr.decode(errors='ignore')}")
         return False
 
 
@@ -1034,20 +1035,47 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
               "Installation: pip3 install openpyxl")
 
     docx_path = dossier_dir / "zusammenfassung.docx"
-    docx_ok = md_to_docx(summary_md_path, docx_path)
-    if not docx_ok:
-        print("⚠  pandoc nicht gefunden oder Fehler — keine .docx-Datei. "
+    timeline_docx = dossier_dir / "zeitlicher_ablauf.docx"
+    timeline_md = dossier_dir / "zeitlicher_ablauf.md"
+
+    have_pandoc = bool(shutil.which("pandoc"))
+    if not have_pandoc:
+        print("⚠  pandoc nicht gefunden — keine .docx-Dateien. "
               "Installation: brew install pandoc")
+        docx_ok = False
+        timeline_docx_ok = False
+        mails_docx_count = 0
+    else:
+        docx_ok = md_to_docx(summary_md_path, docx_path, with_toc=True)
+        timeline_docx_ok = md_to_docx(timeline_md, timeline_docx)
+
+        # Mails (mit YAML-Frontmatter) → markdown-Format statt gfm,
+        # damit pandoc das Frontmatter als Metadata behandelt.
+        mails_md = sorted(mails_dir.glob("*.md"))
+        mails_docx_count = 0
+        if mails_md:
+            print(f"\n→ Konvertiere {len(mails_md)} Mail(s) nach .docx …",
+                  flush=True)
+            for md_file in mails_md:
+                if md_to_docx(md_file, md_file.with_suffix(".docx"),
+                              fmt="markdown"):
+                    mails_docx_count += 1
 
     print(f"\n📂 {dossier_dir}/  (alles für die Akte — bereit zum Zippen)")
     print(f"   ✓ zeitlicher_ablauf.md")
     print(f"   ✓ zeitlicher_ablauf.csv")
     if HAVE_OPENPYXL:
         print(f"   ✓ zeitlicher_ablauf.xlsx")
+    if timeline_docx_ok:
+        print(f"   ✓ zeitlicher_ablauf.docx")
     print(f"   ✓ zusammenfassung.md")
     if docx_ok:
         print(f"   ✓ zusammenfassung.docx")
-    print(f"   ✓ mails/  ({len(relevant_validations)} Belege)")
+    if mails_docx_count:
+        print(f"   ✓ mails/  ({len(relevant_validations)} Belege "
+              f".md + {mails_docx_count} .docx)")
+    else:
+        print(f"   ✓ mails/  ({len(relevant_validations)} Belege)")
     if internal:
         print(f"\n⊘ {intern_path}")
         print(f"   (NUR für dich — {len(internal)} interne Mails aussortiert; "

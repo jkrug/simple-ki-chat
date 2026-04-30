@@ -217,10 +217,13 @@ Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
      (Datum, Beteiligte, Ereignis, Bezug zur Erinnerung, Beleg-Datei)
    - `dossier/zeitlicher_ablauf.xlsx` — Excel-Variante mit Auto-Filter
      und Spaltenbreiten (nur wenn `openpyxl` installiert ist)
+   - `dossier/zeitlicher_ablauf.docx` — Word-Variante der Tabelle
+     (nur wenn `pandoc` installiert ist)
    - `dossier/zusammenfassung.md` — narrative Phasenübersicht
-   - `dossier/zusammenfassung.docx` — Word-Variante (nur wenn `pandoc`
-     installiert ist)
-   - `dossier/mails/` — Volltext aller externen Belege
+   - `dossier/zusammenfassung.docx` — Word-Variante mit Inhaltsverzeichnis
+     (nur wenn `pandoc` installiert ist)
+   - `dossier/mails/<id>.md` + `<id>.docx` — Volltext aller externen
+     Belege als Markdown und (falls `pandoc` da) zusätzlich als Word
 
    **Außerhalb** des Dossier-Ordners (bewusst, damit es beim Zippen
    nicht versehentlich mitgeht):

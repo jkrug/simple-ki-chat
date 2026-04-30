@@ -254,6 +254,13 @@ genutzt: in der Tabelle (Spalte „Anmerkung"), in der narrativen
 Zusammenfassung, und ungeklärte Widersprüche werden am Ende als Warnung
 gelistet (`⚠ N OFFENE Widersprüche`).
 
+**Beide Richtungen abgedeckt:** `/validate-context` persistiert
+zusätzlich die `unsupported`-Liste (Punkte deiner Erinnerung ohne
+Mail-Beleg). Beim nächsten `/dossier` werden diese als eigener Abschnitt
+*„Aus der Erinnerung noch unbelegt"* an die Zusammenfassung angehängt
+und am Ende als Warnung gemeldet — damit prüft das Dossier sowohl
+„Mail → Erinnerung" als auch „Erinnerung → Mail".
+
 ### `/devil` — Anwalt der Gegenseite
 
 Schickt die akzeptierte Timeline + Kontext-Datei mit der Aufgabe „spiele

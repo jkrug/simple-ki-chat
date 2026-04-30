@@ -978,12 +978,30 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
         "| — | Mail führt einen Punkt ein, der in der Erinnerung fehlt |\n\n"
         "---\n\n"
     )
+    unsupported = state.get("context_unsupported") or []
+    unsupported_block = ""
+    if unsupported:
+        rows = []
+        for u in unsupported:
+            cl = u.get("claim", "")
+            sr = (u.get("search") or "").strip()
+            suffix = f" — _Such-Vorschlag: {sr}_" if sr else ""
+            rows.append(f"- {cl}{suffix}")
+        unsupported_block = (
+            "\n\n## Aus der Erinnerung noch unbelegt\n\n"
+            "Folgende Punkte aus der Erinnerung des Mandanten wurden bei "
+            "der letzten `/validate-context`-Prüfung nicht durch Mails "
+            "im Archiv belegt:\n\n"
+            + "\n".join(rows) + "\n"
+        )
+
     summary_md_path = dossier_dir / "zusammenfassung.md"
     summary_md_path.write_text(
         f"# Akte: Zusammenfassung\n\n"
         f"_Stand: {datetime.now().strftime('%Y-%m-%d')}_\n\n"
         f"{legend}"
         f"{text}\n"
+        f"{unsupported_block}"
     )
 
     xlsx_path = dossier_dir / "zeitlicher_ablauf.xlsx"
@@ -1023,6 +1041,20 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
         for c, _ in open_conflicts:
             print(f"   • {c['date_start']} — {c['subject'][:60]}")
         print("   Vor Übergabe klären mit /validate-context.")
+
+    if unsupported:
+        print(f"\n⚠  {len(unsupported)} Punkt(e) aus der Erinnerung sind "
+              f"NOCH UNBELEGT:")
+        for u in unsupported[:5]:
+            print(f"   • {u.get('claim', '')[:70]}")
+        if len(unsupported) > 5:
+            print(f"   … und {len(unsupported) - 5} weitere "
+                  f"(siehe zusammenfassung.md → 'Aus der Erinnerung noch unbelegt').")
+        print("   Mit gezieltem /search oder /devil nachhaken.")
+    elif state.get("context_unsupported") is None:
+        print("\nℹ  Tipp: /validate-context prüft auch die Gegenrichtung — "
+              "welche Punkte deiner Erinnerung von keiner Mail belegt sind. "
+              "Lauf das vor /dossier, dann erscheinen sie in der Zusammenfassung.")
 
 
 def cmd_export(state: dict, out_dir: str) -> None:
@@ -1210,6 +1242,14 @@ JSON: {{
     if suggestions:
         state["last_suggestions"] = suggestions
         print(f"\n→ {len(suggestions)} Such-Vorschläge: mit :1 :2 … direkt ausführen.")
+
+    # Unsupported-Liste persistieren - /dossier liest sie, um die
+    # Gegenrichtung (Erinnerung → Mails) in der Zusammenfassung mitzuführen.
+    state["context_unsupported"] = [
+        {"claim": s.get("claim", ""), "search": s.get("search", "")}
+        for s in uns
+    ]
+    save_session(state)
 
     # Interaktive Klärung der Widersprüche
     if not con:

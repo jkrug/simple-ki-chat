@@ -649,7 +649,9 @@ def md_to_docx(md_path: Path, docx_path: Path) -> bool:
         return False
     try:
         subprocess.run(
-            ["pandoc", str(md_path), "-o", str(docx_path)],
+            ["pandoc", "-f", "gfm", "--standalone",
+             "--toc", "--toc-depth=2",
+             str(md_path), "-o", str(docx_path)],
             check=True, capture_output=True,
         )
         return True
@@ -945,14 +947,35 @@ deutlich, wo Mails die Erinnerung bestätigen (✓), erweitern/präzisieren
 Widersprüchen, zu denen der Mandant eine Klärung notiert hat, übernimm
 diese Klärung sachlich in die Darstellung. KEINE Erfindungen — nur was
 aus den validierten Mails und den Klärungen ersichtlich ist. Verweise
-auf Daten und Beteiligte konkret."""
+auf Daten und Beteiligte konkret.
+
+PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
+- Verwende für jede Phase eine Markdown-Überschrift Ebene 2:
+  `## Phase 1: <Titel>`, `## Phase 2: <Titel>`, …
+- Innerhalb der Phasen für Ereignisse Bullet-Listen mit `-`.
+- Daten und zentrale Personen in **fett** hervorheben.
+- KEIN reines `**Phase 1:**` ohne `##`-Heading — das wäre nur Fettdruck,
+  keine Überschrift.
+- Keine Tabellen, keine Code-Blöcke."""
     text = chat_stream(model, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": summary_prompt},
     ])
+    legend = (
+        "## Legende: Bezug der Mails zur Erinnerung des Mandanten\n\n"
+        "| Symbol | Bedeutung |\n"
+        "|:---:|---|\n"
+        "| ✓ | Mail bestätigt eine Aussage der Erinnerung |\n"
+        "| + | Mail erweitert oder präzisiert die Erinnerung |\n"
+        "| ✗ | Mail widerspricht einer Aussage der Erinnerung |\n"
+        "| — | Mail führt einen Punkt ein, der in der Erinnerung fehlt |\n\n"
+        "---\n\n"
+    )
     (out / "akte_zusammenfassung.md").write_text(
-        f"# Akte: Zusammenfassung\n\n_Stand: "
-        f"{datetime.now().strftime('%Y-%m-%d')}_\n\n{text}\n"
+        f"# Akte: Zusammenfassung\n\n"
+        f"_Stand: {datetime.now().strftime('%Y-%m-%d')}_\n\n"
+        f"{legend}"
+        f"{text}\n"
     )
 
     xlsx_path = out / "akte_zeitlicher_ablauf.xlsx"

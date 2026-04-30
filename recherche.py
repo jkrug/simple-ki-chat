@@ -730,9 +730,18 @@ def cmd_akte(state: dict, model: str, out_dir: str) -> None:
         print("Keine externen Mails — Akte wäre leer. Abbruch.")
         return
 
-    # Aufräumen
-    akte_dir = out / "akte_mails"
-    cleaned = 0
+    # Aufräumen + Verzeichnisstruktur anlegen
+    dossier_dir = out / "dossier"
+    mails_dir = dossier_dir / "mails"
+    intern_path = out / "dossier_intern.md"   # bewusst AUSSERHALB von dossier/
+
+    out.mkdir(parents=True, exist_ok=True)
+    if dossier_dir.exists():
+        shutil.rmtree(dossier_dir)
+        print("   Vorhandenes dossier/ entfernt.")
+    if intern_path.exists():
+        intern_path.unlink()
+    # Auch die alten flachen akte_*-Dateien aus früheren Versionen aufräumen
     for fname in ("akte_zeitlicher_ablauf.md", "akte_zeitlicher_ablauf.csv",
                   "akte_zeitlicher_ablauf.xlsx",
                   "akte_zusammenfassung.md", "akte_zusammenfassung.docx",
@@ -740,15 +749,11 @@ def cmd_akte(state: dict, model: str, out_dir: str) -> None:
         f = out / fname
         if f.exists():
             f.unlink()
-            cleaned += 1
-    if akte_dir.exists():
-        for f in akte_dir.glob("*.md"):
-            f.unlink()
-            cleaned += 1
-    out.mkdir(parents=True, exist_ok=True)
-    akte_dir.mkdir(parents=True, exist_ok=True)
-    if cleaned:
-        print(f"   Vorhandene akte_*-Dateien aufgeräumt: {cleaned}.")
+    legacy_mails = out / "akte_mails"
+    if legacy_mails.exists():
+        shutil.rmtree(legacy_mails)
+    dossier_dir.mkdir(parents=True)
+    mails_dir.mkdir(parents=True)
 
     # Validierung pro Mail
     print(f"\n→ Validiere {len(external)} externe Mails gegen kontext.md")
@@ -865,9 +870,9 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
             f"{esc(llm.get('event') or c['summary'])}{ref_suffix} | "
             f"{mark} | {note} | {Path(c['uri']).name} |"
         )
-    (out / "akte_zeitlicher_ablauf.md").write_text("\n".join(md) + "\n")
+    (dossier_dir / "zeitlicher_ablauf.md").write_text("\n".join(md) + "\n")
 
-    with (out / "akte_zeitlicher_ablauf.csv").open("w", newline="") as f:
+    with (dossier_dir / "zeitlicher_ablauf.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
                     "Bezug", "Kontext-Verweis", "Anmerkung", "Beleg"])
@@ -887,14 +892,16 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
 
     for c, _ in validations:
         body = qmd.fetch(c["uri"], full=True)
-        (akte_dir / Path(c["uri"]).name).write_text(body)
+        (mails_dir / Path(c["uri"]).name).write_text(body)
 
     if internal:
         intern_md = [
             "# Aussortiert: interne Korrespondenz",
             "",
-            f"_NUR FÜR DICH — nicht für die Akte. {len(internal)} Mail(s), "
-            f"basierend auf `## Interne Kontakte` in kontext.md._",
+            f"_NUR FÜR DICH — bewusst außerhalb des dossier-Verzeichnisses, "
+            f"damit es beim Zippen nicht versehentlich mitgeht. "
+            f"{len(internal)} Mail(s), basierend auf `## Interne Kontakte` "
+            f"in kontext.md._",
             "",
             f"Filter-Patterns: {', '.join(repr(p) for p in patterns)}",
             "",
@@ -907,7 +914,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
                 f"| {c['date_start']} | {esc(parts)} | "
                 f"{esc(c['subject'])} | {Path(c['uri']).name} |"
             )
-        (out / "akte_intern.md").write_text("\n".join(intern_md) + "\n")
+        intern_path.write_text("\n".join(intern_md) + "\n")
 
     print(f"\n→ Generiere narrative Zusammenfassung\n")
     def _line(c: dict, llm: dict) -> str:
@@ -971,37 +978,41 @@ PFLICHT-FORMATIERUNG (das Dokument wird nach Word konvertiert):
         "| — | Mail führt einen Punkt ein, der in der Erinnerung fehlt |\n\n"
         "---\n\n"
     )
-    (out / "akte_zusammenfassung.md").write_text(
+    summary_md_path = dossier_dir / "zusammenfassung.md"
+    summary_md_path.write_text(
         f"# Akte: Zusammenfassung\n\n"
         f"_Stand: {datetime.now().strftime('%Y-%m-%d')}_\n\n"
         f"{legend}"
         f"{text}\n"
     )
 
-    xlsx_path = out / "akte_zeitlicher_ablauf.xlsx"
+    xlsx_path = dossier_dir / "zeitlicher_ablauf.xlsx"
     if HAVE_OPENPYXL:
         write_xlsx(xlsx_path, validations)
     else:
         print("⚠  openpyxl fehlt — keine .xlsx-Datei. "
               "Installation: pip3 install openpyxl")
 
-    docx_path = out / "akte_zusammenfassung.docx"
-    docx_ok = md_to_docx(out / "akte_zusammenfassung.md", docx_path)
+    docx_path = dossier_dir / "zusammenfassung.docx"
+    docx_ok = md_to_docx(summary_md_path, docx_path)
     if not docx_ok:
         print("⚠  pandoc nicht gefunden oder Fehler — keine .docx-Datei. "
               "Installation: brew install pandoc")
 
-    print(f"\n✓ {out / 'akte_zeitlicher_ablauf.md'}")
-    print(f"✓ {out / 'akte_zeitlicher_ablauf.csv'}")
+    print(f"\n📂 {dossier_dir}/  (alles für die Akte — bereit zum Zippen)")
+    print(f"   ✓ zeitlicher_ablauf.md")
+    print(f"   ✓ zeitlicher_ablauf.csv")
     if HAVE_OPENPYXL:
-        print(f"✓ {xlsx_path}")
-    print(f"✓ {out / 'akte_zusammenfassung.md'}")
+        print(f"   ✓ zeitlicher_ablauf.xlsx")
+    print(f"   ✓ zusammenfassung.md")
     if docx_ok:
-        print(f"✓ {docx_path}")
-    print(f"✓ {akte_dir}/  ({len(validations)} Mails)")
+        print(f"   ✓ zusammenfassung.docx")
+    print(f"   ✓ mails/  ({len(validations)} Belege)")
     if internal:
-        print(f"⊘ {out / 'akte_intern.md'}  "
-              f"(NUR für dich — {len(internal)} interne Mails aussortiert)")
+        print(f"\n⊘ {intern_path}")
+        print(f"   (NUR für dich — {len(internal)} interne Mails aussortiert; "
+              f"liegt bewusst AUSSERHALB von dossier/, damit es beim Zippen "
+              f"nicht mit reingeht)")
 
     open_conflicts = [(c, llm) for c, llm in validations
                       if llm.get("classification") == "contradicts"

@@ -204,16 +204,25 @@ Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
    `akte_mails/` werden vor dem Schreiben gelöscht. Keine Altlasten.
 
 4. **Schreibt diese Artefakte:**
-   - `akte_zeitlicher_ablauf.md` / `.csv` — Tabelle für das Gericht (Datum,
-     Beteiligte, Ereignis, Bezug zur Erinnerung, Beleg-Datei)
-   - `akte_zeitlicher_ablauf.xlsx` — Excel-Variante mit Auto-Filter
+
+   Alles für die Akte landet in `<out>/dossier/` — bereit zum Zippen
+   und Versenden an die Anwälte:
+   - `dossier/zeitlicher_ablauf.md` / `.csv` — Tabelle für das Gericht
+     (Datum, Beteiligte, Ereignis, Bezug zur Erinnerung, Beleg-Datei)
+   - `dossier/zeitlicher_ablauf.xlsx` — Excel-Variante mit Auto-Filter
      und Spaltenbreiten (nur wenn `openpyxl` installiert ist)
-   - `akte_zusammenfassung.md` — narrative Phasenübersicht für das Gericht
-   - `akte_zusammenfassung.docx` — Word-Variante der Zusammenfassung
-     (nur wenn `pandoc` installiert ist)
-   - `akte_mails/` — Volltext aller externen Belege
-   - `akte_intern.md` — Übersicht aussortierter interner Mails (NUR für
-     dich, nicht für die Akte)
+   - `dossier/zusammenfassung.md` — narrative Phasenübersicht
+   - `dossier/zusammenfassung.docx` — Word-Variante (nur wenn `pandoc`
+     installiert ist)
+   - `dossier/mails/` — Volltext aller externen Belege
+
+   **Außerhalb** des Dossier-Ordners (bewusst, damit es beim Zippen
+   nicht versehentlich mitgeht):
+   - `dossier_intern.md` — Übersicht aussortierter interner Mails,
+     NUR für dich
+
+   Vor dem Schreiben wird `dossier/` komplett gelöscht und neu angelegt.
+   Alte flache `akte_*`-Dateien aus früheren Versionen werden aufgeräumt.
 
 ### `/validate-context` — Erinnerung gegen Mails prüfen
 

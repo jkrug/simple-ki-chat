@@ -26,6 +26,17 @@ Geteilter qmd-Helper liegt in `qmd.py`.
 - Mindestens ein passendes Modell, z. B.
   `ollama pull qwen2.5:32b` oder `ollama pull gpt-oss:20b`
 
+**Optional, nur für `/dossier`-Export in Word/Excel:**
+
+```bash
+pip3 install openpyxl     # für .xlsx (Tabelle für Anwälte)
+brew install pandoc       # für .docx (Zusammenfassung für Anwälte)
+```
+
+Fehlt eines der beiden, läuft `/dossier` trotzdem — du bekommst dann
+nur die Markdown- und CSV-Varianten und einen Hinweis, was nachzuziehen
+wäre.
+
 ## `chat.py` — schneller RAG-Chat
 
 ```bash
@@ -183,10 +194,14 @@ Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
 3. **Räumt vorher auf** — alle `akte_*`-Dateien und der Inhalt von
    `akte_mails/` werden vor dem Schreiben gelöscht. Keine Altlasten.
 
-4. **Schreibt vier Artefakte:**
+4. **Schreibt diese Artefakte:**
    - `akte_zeitlicher_ablauf.md` / `.csv` — Tabelle für das Gericht (Datum,
      Beteiligte, Ereignis, Bezug zur Erinnerung, Beleg-Datei)
+   - `akte_zeitlicher_ablauf.xlsx` — Excel-Variante mit Auto-Filter
+     und Spaltenbreiten (nur wenn `openpyxl` installiert ist)
    - `akte_zusammenfassung.md` — narrative Phasenübersicht für das Gericht
+   - `akte_zusammenfassung.docx` — Word-Variante der Zusammenfassung
+     (nur wenn `pandoc` installiert ist)
    - `akte_mails/` — Volltext aller externen Belege
    - `akte_intern.md` — Übersicht aussortierter interner Mails (NUR für
      dich, nicht für die Akte)

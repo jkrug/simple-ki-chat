@@ -19,6 +19,13 @@ from pathlib import Path
 
 import qmd
 
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    HAVE_OPENPYXL = True
+except ImportError:
+    HAVE_OPENPYXL = False
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:32b")
 DEFAULT_OUT = Path.home() / "marmalade-fall" / "output"
@@ -546,6 +553,58 @@ JSON: {{"gaps": [{{"period": "...", "concern": "...", "search": "..."}}]}}"""
         print(f"  Suche:    {g.get('search', '')}")
 
 
+CLASS_MARK = {"confirmed": "✓", "extends": "+", "contradicts": "✗",
+              "new": "—", "?": "?"}
+
+
+def write_xlsx(path: Path, validations: list[tuple[dict, dict]]) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Zeitlicher Ablauf"
+    headers = ["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
+               "Bezug", "Kontext-Verweis", "Beleg"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for c, llm in validations:
+        ev_date = llm.get("event_date") or c["date_start"]
+        sent_date = c["date_start"] if c["date_start"] != ev_date else ""
+        ws.append([
+            ev_date,
+            sent_date,
+            "; ".join(c["participants"]),
+            llm.get("event") or c["summary"],
+            CLASS_MARK.get(llm.get("classification", "?"), "?"),
+            llm.get("context_reference", ""),
+            Path(c["uri"]).name,
+        ])
+    widths = [12, 12, 32, 65, 7, 32, 28]
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    for row in ws.iter_rows(min_row=2):
+        row[3].alignment = Alignment(wrap_text=True, vertical="top")
+        row[5].alignment = Alignment(wrap_text=True, vertical="top")
+        row[4].alignment = Alignment(horizontal="center", vertical="top")
+    ws.auto_filter.ref = ws.dimensions
+    ws.freeze_panes = "A2"
+    wb.save(path)
+
+
+def md_to_docx(md_path: Path, docx_path: Path) -> bool:
+    """md -> docx via pandoc. Liefert True bei Erfolg, False sonst."""
+    if not shutil.which("pandoc"):
+        return False
+    try:
+        subprocess.run(
+            ["pandoc", str(md_path), "-o", str(docx_path)],
+            check=True, capture_output=True,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"      pandoc-Fehler: {e.stderr.decode(errors='ignore')}")
+        return False
+
+
 INTERNAL_SECTION_RE = re.compile(
     r"^##\s*Interne\s*Kontakte[^\n]*\n(.*?)(?=^##\s|\Z)",
     re.MULTILINE | re.DOTALL | re.IGNORECASE,
@@ -620,7 +679,9 @@ def cmd_akte(state: dict, model: str, out_dir: str) -> None:
     akte_dir = out / "akte_mails"
     cleaned = 0
     for fname in ("akte_zeitlicher_ablauf.md", "akte_zeitlicher_ablauf.csv",
-                  "akte_zusammenfassung.md", "akte_intern.md"):
+                  "akte_zeitlicher_ablauf.xlsx",
+                  "akte_zusammenfassung.md", "akte_zusammenfassung.docx",
+                  "akte_intern.md"):
         f = out / fname
         if f.exists():
             f.unlink()
@@ -720,9 +781,6 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
     if not validations:
         print("Keine validierten Mails. Abbruch.")
         return
-
-    CLASS_MARK = {"confirmed": "✓", "extends": "+", "contradicts": "✗",
-                  "new": "—", "?": "?"}
 
     def esc(s: str) -> str:
         return str(s).replace("|", "\\|").replace("\n", " ")
@@ -826,9 +884,26 @@ Verweise auf Daten und Beteiligte konkret."""
         f"{datetime.now().strftime('%Y-%m-%d')}_\n\n{text}\n"
     )
 
+    xlsx_path = out / "akte_zeitlicher_ablauf.xlsx"
+    if HAVE_OPENPYXL:
+        write_xlsx(xlsx_path, validations)
+    else:
+        print("⚠  openpyxl fehlt — keine .xlsx-Datei. "
+              "Installation: pip3 install openpyxl")
+
+    docx_path = out / "akte_zusammenfassung.docx"
+    docx_ok = md_to_docx(out / "akte_zusammenfassung.md", docx_path)
+    if not docx_ok:
+        print("⚠  pandoc nicht gefunden oder Fehler — keine .docx-Datei. "
+              "Installation: brew install pandoc")
+
     print(f"\n✓ {out / 'akte_zeitlicher_ablauf.md'}")
     print(f"✓ {out / 'akte_zeitlicher_ablauf.csv'}")
+    if HAVE_OPENPYXL:
+        print(f"✓ {xlsx_path}")
     print(f"✓ {out / 'akte_zusammenfassung.md'}")
+    if docx_ok:
+        print(f"✓ {docx_path}")
     print(f"✓ {akte_dir}/  ({len(validations)} Mails)")
     if internal:
         print(f"⊘ {out / 'akte_intern.md'}  "

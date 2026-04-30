@@ -229,6 +229,22 @@ Die Such-Vorschläge landen wieder als nummerierte Liste, ausführbar per
 `:1`, `:2`, … Außerdem ist im System-Prompt verankert: bei Konflikt
 zwischen Erinnerung und Mail folgt das LLM grundsätzlich der Mail.
 
+**Klärungs-Workflow für Widersprüche:** Nach der Klassifikation bietet
+`/validate-context` an, jeden ✗-Widerspruch interaktiv zu klären. Pro
+Konflikt wählst du:
+
+- `[k] kontext editieren` — öffnet `kontext.md` im Editor (Erinnerung
+  korrigieren).
+- `[e] erklären` — du tippst eine Anmerkung (z. B. "gemeint war Y, nicht
+  X"). Wird **persistent** in der Session gespeichert, an der zugehörigen
+  Mail oder als allgemeine Klarstellung.
+- `[s] skip` — bleibt offen.
+
+Beim nächsten `/dossier` werden gespeicherte Klärungen automatisch
+genutzt: in der Tabelle (Spalte „Anmerkung"), in der narrativen
+Zusammenfassung, und ungeklärte Widersprüche werden am Ende als Warnung
+gelistet (`⚠ N OFFENE Widersprüche`).
+
 ### `/devil` — Anwalt der Gegenseite
 
 Schickt die akzeptierte Timeline + Kontext-Datei mit der Aufgabe „spiele

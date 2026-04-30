@@ -562,7 +562,7 @@ def write_xlsx(path: Path, validations: list[tuple[dict, dict]]) -> None:
     ws = wb.active
     ws.title = "Zeitlicher Ablauf"
     headers = ["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
-               "Bezug", "Kontext-Verweis", "Beleg"]
+               "Bezug", "Kontext-Verweis", "Anmerkung", "Beleg"]
     ws.append(headers)
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -576,14 +576,16 @@ def write_xlsx(path: Path, validations: list[tuple[dict, dict]]) -> None:
             llm.get("event") or c["summary"],
             CLASS_MARK.get(llm.get("classification", "?"), "?"),
             llm.get("context_reference", ""),
+            (c.get("resolution_note") or "").strip(),
             Path(c["uri"]).name,
         ])
-    widths = [12, 12, 32, 65, 7, 32, 28]
+    widths = [12, 12, 30, 60, 7, 28, 35, 26]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
     for row in ws.iter_rows(min_row=2):
         row[3].alignment = Alignment(wrap_text=True, vertical="top")
         row[5].alignment = Alignment(wrap_text=True, vertical="top")
+        row[6].alignment = Alignment(wrap_text=True, vertical="top")
         row[4].alignment = Alignment(horizontal="center", vertical="top")
     ws.auto_filter.ref = ws.dimensions
     ws.freeze_panes = "A2"
@@ -794,8 +796,8 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
           "_Datum = Datum des eigentlichen Ereignisses; "
           "Eingang = Datum der Mail im Postfach (bei Weiterleitungen abweichend)._",
           "",
-          "| Datum | Eingang | Beteiligte | Ereignis | Bezug | Beleg |",
-          "|-------|---------|------------|----------|:----:|-------|"]
+          "| Datum | Eingang | Beteiligte | Ereignis | Bezug | Anmerkung | Beleg |",
+          "|-------|---------|------------|----------|:----:|-----------|-------|"]
     for c, llm in validations:
         parts = "; ".join(c["participants"][:3])
         cls = llm.get("classification", "?")
@@ -804,17 +806,18 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
         ref_suffix = f" _({esc(ref)})_" if ref else ""
         ev_date = llm.get("event_date") or c["date_start"]
         sent_date = c["date_start"] if c["date_start"] != ev_date else ""
+        note = esc((c.get("resolution_note") or "").strip())
         md.append(
             f"| {ev_date} | {sent_date} | {esc(parts)} | "
             f"{esc(llm.get('event') or c['summary'])}{ref_suffix} | "
-            f"{mark} | {Path(c['uri']).name} |"
+            f"{mark} | {note} | {Path(c['uri']).name} |"
         )
     (out / "akte_zeitlicher_ablauf.md").write_text("\n".join(md) + "\n")
 
     with (out / "akte_zeitlicher_ablauf.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
-                    "Bezug", "Kontext-Verweis", "Beleg"])
+                    "Bezug", "Kontext-Verweis", "Anmerkung", "Beleg"])
         for c, llm in validations:
             ev_date = llm.get("event_date") or c["date_start"]
             sent_date = c["date_start"] if c["date_start"] != ev_date else ""
@@ -825,6 +828,7 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
                 llm.get("event") or c["summary"],
                 llm.get("classification", "?"),
                 llm.get("context_reference", ""),
+                (c.get("resolution_note") or "").strip(),
                 Path(c["uri"]).name,
             ])
 
@@ -853,12 +857,26 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
         (out / "akte_intern.md").write_text("\n".join(intern_md) + "\n")
 
     print(f"\n→ Generiere narrative Zusammenfassung\n")
-    timeline = "\n".join(
-        f"- {llm.get('event_date') or c['date_start']} "
-        f"[{CLASS_MARK.get(llm.get('classification','?'),'?')}] "
-        f"{llm.get('event') or c['summary']}"
-        for c, llm in validations
-    )
+    def _line(c: dict, llm: dict) -> str:
+        base = (f"- {llm.get('event_date') or c['date_start']} "
+                f"[{CLASS_MARK.get(llm.get('classification','?'),'?')}] "
+                f"{llm.get('event') or c['summary']}")
+        note = (c.get("resolution_note") or "").strip()
+        if note:
+            base += f"\n  Klärung des Mandanten: {note}"
+        return base
+
+    timeline = "\n".join(_line(c, llm) for c, llm in validations)
+
+    extra_resolutions = state.get("context_resolutions") or []
+    extra_block = ""
+    if extra_resolutions:
+        extra_block = ("\n\nWeitere Klärungen des Mandanten (ohne direkten "
+                       "Mail-Bezug):\n" +
+                       "\n".join(f"- Behauptung: {r.get('claim', '')}\n"
+                                 f"  Klarstellung: {r.get('note', '')}"
+                                 for r in extra_resolutions))
+
     summary_prompt = f"""Mandant: {state['case_description']}
 
 Erinnerung des Mandanten:
@@ -867,14 +885,16 @@ Erinnerung des Mandanten:
 ---
 
 Validierte Timeline (chronologisch, externe Mails, mit Bezug zur Erinnerung):
-{timeline}
+{timeline}{extra_block}
 
 Schreibe eine narrative Zusammenfassung für das Gericht (deutsch,
 juristisch nüchtern). Strukturiere nach erkennbaren Phasen. Mache
 deutlich, wo Mails die Erinnerung bestätigen (✓), erweitern/präzisieren
-(+), widersprechen (✗) oder einen neuen Punkt einführen (—). KEINE
-Erfindungen — nur was aus den validierten Mails ersichtlich ist.
-Verweise auf Daten und Beteiligte konkret."""
+(+), widersprechen (✗) oder einen neuen Punkt einführen (—). Bei
+Widersprüchen, zu denen der Mandant eine Klärung notiert hat, übernimm
+diese Klärung sachlich in die Darstellung. KEINE Erfindungen — nur was
+aus den validierten Mails und den Klärungen ersichtlich ist. Verweise
+auf Daten und Beteiligte konkret."""
     text = chat_stream(model, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": summary_prompt},
@@ -908,6 +928,16 @@ Verweise auf Daten und Beteiligte konkret."""
     if internal:
         print(f"⊘ {out / 'akte_intern.md'}  "
               f"(NUR für dich — {len(internal)} interne Mails aussortiert)")
+
+    open_conflicts = [(c, llm) for c, llm in validations
+                      if llm.get("classification") == "contradicts"
+                      and not (c.get("resolution_note") or "").strip()]
+    if open_conflicts:
+        print(f"\n⚠  {len(open_conflicts)} OFFENE Widerspruch/Widersprüche "
+              f"(noch nicht geklärt):")
+        for c, _ in open_conflicts:
+            print(f"   • {c['date_start']} — {c['subject'][:60]}")
+        print("   Vor Übergabe klären mit /validate-context.")
 
 
 def cmd_export(state: dict, out_dir: str) -> None:
@@ -1017,7 +1047,7 @@ def cmd_validate_context(state: dict, model: str, out_dir: str) -> None:
         print("Noch keine akzeptierten Mails — Validierung braucht Belegmaterial.")
         return
     timeline = "\n".join(
-        f"- {c['date_start']} — {c['subject']} "
+        f"- [{Path(c['uri']).name}] {c['date_start']} — {c['subject']} "
         f"({', '.join(c['participants'][:2])}): {c['summary']}"
         for c in accepted
     )
@@ -1028,7 +1058,7 @@ Subjektive Erinnerung des Mandanten (vor Jahren) — kann fehlerhaft sein:
 {ctx_text}
 ---
 
-Belegte Mails aus dem Mailarchiv (chronologisch, mit Kernaussagen):
+Belegte Mails aus dem Mailarchiv (chronologisch, mit Filename in []):
 {timeline}
 
 Prüfe Punkt für Punkt aus der Erinnerung gegen die Mails. Ordne jede
@@ -1038,6 +1068,9 @@ prüfbare Aussage in genau eine der drei Kategorien:
   (nenne im "evidence"-Feld Datum + Betreff der Mail)
 - "contradicted": eine Mail widerspricht der Erinnerung
   (nenne im "issue"-Feld den Widerspruch + Datum + Betreff;
+   nenne im "mail_ref"-Feld den Filename aus den []-Klammern oben,
+   wenn die widersprechende Mail eindeutig identifizierbar ist —
+   sonst "" lassen;
    im "search"-Feld eine 2-5-Wort-Stichwortsuche zur Vertiefung)
 - "unsupported": Aussage hat keinen Mail-Beleg
   (im "search"-Feld eine 2-5-Wort-Stichwortsuche, mit der man Belege
@@ -1048,7 +1081,7 @@ Konzentriere dich auf konkrete Behauptungen (Daten, Handlungen, Aussagen).
 
 JSON: {{
   "supported":     [{{"claim": "...", "evidence": "..."}}],
-  "contradicted":  [{{"claim": "...", "issue": "...", "search": "..."}}],
+  "contradicted":  [{{"claim": "...", "issue": "...", "mail_ref": "...", "search": "..."}}],
   "unsupported":   [{{"claim": "...", "search": "..."}}]
 }}"""
     try:
@@ -1076,8 +1109,10 @@ JSON: {{
         print(f"  • {s.get('claim', '')}")
         if s.get("issue"):
             print(f"      → Konflikt: {s['issue']}")
+        if s.get("mail_ref"):
+            print(f"      → Mail:    {s['mail_ref']}")
         if s.get("search"):
-            print(f"      → Suche: {s['search']}")
+            print(f"      → Suche:   {s['search']}")
             suggestions.append(s["search"])
 
     print(f"\n? Unbelegt — keine Mails dazu ({len(uns)}):")
@@ -1090,6 +1125,77 @@ JSON: {{
     if suggestions:
         state["last_suggestions"] = suggestions
         print(f"\n→ {len(suggestions)} Such-Vorschläge: mit :1 :2 … direkt ausführen.")
+
+    # Interaktive Klärung der Widersprüche
+    if not con:
+        return
+    try:
+        ans = input(f"\n{len(con)} Widerspruch/Widersprüche jetzt klären? [j/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if ans not in {"j", "ja", "y", "yes"}:
+        print("Übersprungen — Klärungen kannst du jederzeit per /validate-context nachholen.")
+        return
+
+    by_filename = {Path(c["uri"]).name: c["uri"]
+                   for c in state["candidates"].values()}
+
+    for i, w in enumerate(con, 1):
+        print("\n" + "─" * 70)
+        print(f"[{i}/{len(con)}] Behauptung: {w.get('claim', '')}")
+        if w.get("issue"):
+            print(f"   Konflikt: {w['issue']}")
+        ref = (w.get("mail_ref") or "").strip()
+        m = re.search(r"[\w.-]+\.md", ref)
+        ref_clean = m.group(0) if m else ""
+        if ref_clean and ref_clean in by_filename:
+            print(f"   Mail:     {ref_clean}  (zugeordnet)")
+        elif ref:
+            print(f"   Mail-Hinweis: {ref}  (nicht eindeutig zugeordnet)")
+        else:
+            print("   (keine Mail-Referenz vom LLM angegeben)")
+
+        while True:
+            try:
+                act = input("\n  [k]ontext editieren / [e]rklären / "
+                            "[s]kip / [q]uit: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                save_session(state)
+                print("\n  Klärung abgebrochen, Session gespeichert.")
+                return
+            if act == "q":
+                save_session(state)
+                return
+            if act == "s":
+                break
+            if act == "k":
+                cmd_context(state, "edit", out_dir)
+                continue
+            if act == "e":
+                try:
+                    note = input("  Anmerkung (1-2 Sätze): ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
+                if not note:
+                    print("  Leere Eingabe, übersprungen.")
+                    break
+                if ref_clean and ref_clean in by_filename:
+                    uri = by_filename[ref_clean]
+                    state["candidates"][uri]["resolution_note"] = note
+                    print(f"  ✓ Anmerkung an Mail {ref_clean} gespeichert.")
+                else:
+                    state.setdefault("context_resolutions", []).append({
+                        "claim": w.get("claim", ""),
+                        "issue": w.get("issue", ""),
+                        "note": note,
+                    })
+                    print("  ✓ Anmerkung als allgemeine Klärung gespeichert "
+                          "(keine Mail-Zuordnung).")
+                save_session(state)
+                break
+            print("  Optionen: k e s q")
 
 
 def cmd_devil(state: dict, model: str, out_dir: str) -> None:

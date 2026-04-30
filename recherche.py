@@ -641,7 +641,17 @@ def cmd_akte(state: dict, model: str, out_dir: str) -> None:
     for i, c in enumerate(external, 1):
         print(f"   [{i}/{len(external)}] {c['date_start']} — "
               f"{c['subject'][:55]}", flush=True)
-        prompt = f"""Du validierst eine E-Mail gegen die Erinnerung des Mandanten.
+        try:
+            full_body = qmd.fetch(c["uri"], full=True)
+        except subprocess.CalledProcessError as e:
+            print(f"      qmd-Fehler: {e}")
+            full_body = c["body_excerpt"]
+        # Frontmatter abschneiden, nur Mail-Inhalt ans LLM geben
+        _, body_only = qmd.parse_frontmatter(full_body)
+        body_only = body_only[:6000]
+
+        prompt = f"""Du erstellst einen Eintrag für die Gerichtsakte aus einer E-Mail
+und validierst sie zugleich gegen die Erinnerung des Mandanten.
 
 Erinnerung des Mandanten (kontext.md):
 ---
@@ -652,31 +662,40 @@ E-Mail:
 - Versanddatum (Frontmatter): {c['date_start']}
 - Betreff: {c['subject']}
 - Beteiligte: {', '.join(c['participants'])}
-- Bekannte Kernaussage: {c['summary']}
-- Auszug: {c['body_excerpt'][:2000]}
 
-WEITERLEITUNGEN: Wenn der Betreff mit "WG:", "FW:", "Fwd:", "Wtr:"
+Mail-Inhalt:
+---
+{body_only}
+---
+
+EREIGNISDATUM: Wenn der Betreff mit "WG:", "FW:", "Fwd:", "Wtr:"
 beginnt oder das Mail-Layout mehrere Header zeigt ("Von: ...
-Gesendet: ..."), dann ist das relevante EREIGNISDATUM das Datum der
-ursprünglichen Mail im weitergeleiteten Block — NICHT das
-Versanddatum. Extrahiere es aus dem Auszug. Falls nicht eindeutig
-erkennbar oder es sich nicht um eine Weiterleitung handelt: gib
-das Versanddatum zurück.
+Gesendet: ..."), dann ist das relevante Datum das der ursprünglichen
+Mail im weitergeleiteten Block — NICHT das Versanddatum. Extrahiere
+es aus dem Inhalt. Sonst Versanddatum.
 
-Klassifiziere die Beziehung zwischen Mail und Erinnerung in genau einer Kategorie:
-- "confirmed":   die Mail bestätigt eine konkrete Aussage der Erinnerung
-- "extends":     die Mail erweitert/präzisiert die Erinnerung
-- "contradicts": die Mail widerspricht einer Aussage der Erinnerung
+EREIGNIS-FORMULIERUNG (Feld "event"):
+- Ein einziger, vollständiger deutscher Satz für die Gerichtstabelle.
+- Beschreibe konkret WAS geschehen ist, WER gehandelt hat (Person/Rolle),
+  was der INHALTLICHE Kern war.
+- Geschäftsmäßiger, juristisch-nüchterner Ton — präsentabel vor Gericht.
+- KEINE Wiederholung des Betreffs.
+- KEINE Phrasen wie "wurde mitgeteilt, dass…" wenn der Inhalt klar genug ist.
+- Falls eine Verpflichtung, Frist, Forderung, Zusage oder Ablehnung
+  ausgesprochen wurde: das ausdrücklich nennen.
+
+KLASSIFIKATION (Feld "classification") — Beziehung zur Erinnerung:
+- "confirmed":   bestätigt eine konkrete Aussage der Erinnerung
+- "extends":     erweitert/präzisiert die Erinnerung
+- "contradicts": widerspricht einer Aussage der Erinnerung
 - "new":         Punkt, der in der Erinnerung gar nicht vorkommt
 
-Formuliere für die Gerichtstabelle ein präzises, juristisch-nüchternes
-Ereignis (1 Satz, deutsch). Wenn die Mail eine Aussage der Erinnerung
-direkt belegt/widerlegt, nenne den Bezug knapp im Feld
-"context_reference" (sonst leer lassen).
+Wenn die Mail eine Aussage der Erinnerung direkt belegt/widerlegt,
+nenne den Bezug knapp im Feld "context_reference" (sonst leer).
 
 JSON: {{"classification": "confirmed|extends|contradicts|new",
        "event_date": "YYYY-MM-DD",
-       "event": "<1-Satz>",
+       "event": "<1 vollständiger Satz>",
        "context_reference": "<Bezug oder leer>"}}"""
         try:
             llm = json.loads(chat(model, [

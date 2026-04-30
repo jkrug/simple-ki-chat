@@ -649,11 +649,19 @@ Erinnerung des Mandanten (kontext.md):
 ---
 
 E-Mail:
-- Datum: {c['date_start']}
+- Versanddatum (Frontmatter): {c['date_start']}
 - Betreff: {c['subject']}
 - Beteiligte: {', '.join(c['participants'])}
 - Bekannte Kernaussage: {c['summary']}
-- Auszug: {c['body_excerpt'][:1500]}
+- Auszug: {c['body_excerpt'][:2000]}
+
+WEITERLEITUNGEN: Wenn der Betreff mit "WG:", "FW:", "Fwd:", "Wtr:"
+beginnt oder das Mail-Layout mehrere Header zeigt ("Von: ...
+Gesendet: ..."), dann ist das relevante EREIGNISDATUM das Datum der
+ursprünglichen Mail im weitergeleiteten Block — NICHT das
+Versanddatum. Extrahiere es aus dem Auszug. Falls nicht eindeutig
+erkennbar oder es sich nicht um eine Weiterleitung handelt: gib
+das Versanddatum zurück.
 
 Klassifiziere die Beziehung zwischen Mail und Erinnerung in genau einer Kategorie:
 - "confirmed":   die Mail bestätigt eine konkrete Aussage der Erinnerung
@@ -667,6 +675,7 @@ direkt belegt/widerlegt, nenne den Bezug knapp im Feld
 "context_reference" (sonst leer lassen).
 
 JSON: {{"classification": "confirmed|extends|contradicts|new",
+       "event_date": "YYYY-MM-DD",
        "event": "<1-Satz>",
        "context_reference": "<Bezug oder leer>"}}"""
         try:
@@ -680,8 +689,14 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
         except (json.JSONDecodeError, urllib.error.URLError) as e:
             print(f"      LLM-Fehler: {e}")
             llm = {"classification": "?", "event": c["summary"],
-                   "context_reference": ""}
+                   "context_reference": "", "event_date": ""}
+        ed = (llm.get("event_date") or "").strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", ed):
+            ed = c["date_start"]
+        llm["event_date"] = ed
         validations.append((c, llm))
+
+    validations.sort(key=lambda v: (v[1].get("event_date") or v[0]["date_start"]))
 
     if not validations:
         print("Keine validierten Mails. Abbruch.")
@@ -699,16 +714,21 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
           "**Bezug zur Erinnerung des Mandanten:** "
           "✓ bestätigt &nbsp; + erweitert &nbsp; ✗ widerspricht &nbsp; — neu",
           "",
-          "| Datum | Beteiligte | Ereignis | Bezug | Beleg |",
-          "|-------|------------|----------|:----:|-------|"]
+          "_Datum = Datum des eigentlichen Ereignisses; "
+          "Eingang = Datum der Mail im Postfach (bei Weiterleitungen abweichend)._",
+          "",
+          "| Datum | Eingang | Beteiligte | Ereignis | Bezug | Beleg |",
+          "|-------|---------|------------|----------|:----:|-------|"]
     for c, llm in validations:
         parts = "; ".join(c["participants"][:3])
         cls = llm.get("classification", "?")
         mark = CLASS_MARK.get(cls, "?")
         ref = (llm.get("context_reference") or "").strip()
         ref_suffix = f" _({esc(ref)})_" if ref else ""
+        ev_date = llm.get("event_date") or c["date_start"]
+        sent_date = c["date_start"] if c["date_start"] != ev_date else ""
         md.append(
-            f"| {c['date_start']} | {esc(parts)} | "
+            f"| {ev_date} | {sent_date} | {esc(parts)} | "
             f"{esc(llm.get('event') or c['summary'])}{ref_suffix} | "
             f"{mark} | {Path(c['uri']).name} |"
         )
@@ -716,11 +736,14 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
 
     with (out / "akte_zeitlicher_ablauf.csv").open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Datum", "Beteiligte", "Ereignis", "Bezug",
-                    "Kontext-Verweis", "Beleg"])
+        w.writerow(["Datum", "Eingang (Postfach)", "Beteiligte", "Ereignis",
+                    "Bezug", "Kontext-Verweis", "Beleg"])
         for c, llm in validations:
+            ev_date = llm.get("event_date") or c["date_start"]
+            sent_date = c["date_start"] if c["date_start"] != ev_date else ""
             w.writerow([
-                c["date_start"],
+                ev_date,
+                sent_date,
                 "; ".join(c["participants"]),
                 llm.get("event") or c["summary"],
                 llm.get("classification", "?"),
@@ -754,7 +777,8 @@ JSON: {{"classification": "confirmed|extends|contradicts|new",
 
     print(f"\n→ Generiere narrative Zusammenfassung\n")
     timeline = "\n".join(
-        f"- {c['date_start']} [{CLASS_MARK.get(llm.get('classification','?'),'?')}] "
+        f"- {llm.get('event_date') or c['date_start']} "
+        f"[{CLASS_MARK.get(llm.get('classification','?'),'?')}] "
         f"{llm.get('event') or c['summary']}"
         for c, llm in validations
     )

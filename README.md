@@ -29,9 +29,18 @@ Geteilter qmd-Helper liegt in `qmd.py`.
 **Optional, nur für `/dossier`-Export in Word/Excel:**
 
 ```bash
-pip3 install openpyxl     # für .xlsx (Tabelle für Anwälte)
-brew install pandoc       # für .docx (Zusammenfassung für Anwälte)
+# Virtuelle Umgebung im Projekt anlegen (Homebrew-Python ist externally
+# managed → systemweites pip ist gesperrt)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt        # zieht openpyxl
+
+# pandoc kommt aus Homebrew, nicht aus pip:
+brew install pandoc
 ```
+
+Vor jeder Session einmal `source .venv/bin/activate`, danach `python3
+recherche.py …` wie gewohnt.
 
 Fehlt eines der beiden, läuft `/dossier` trotzdem — du bekommst dann
 nur die Markdown- und CSV-Varianten und einen Hinweis, was nachzuziehen

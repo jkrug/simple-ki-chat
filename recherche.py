@@ -248,6 +248,7 @@ def make_candidate(uri: str) -> dict:
     return {
         "uri": uri,
         "status": "pending",
+        "confidential": False,
         "subject": meta.get("subject", ""),
         "participants": parts,
         "date_start": qmd.normalize_date(meta.get("date_start", "")),
@@ -545,6 +546,252 @@ JSON: {{"gaps": [{{"period": "...", "concern": "...", "search": "..."}}]}}"""
         print(f"  Suche:    {g.get('search', '')}")
 
 
+INTERNAL_SECTION_RE = re.compile(
+    r"^##\s*Interne\s*Kontakte[^\n]*\n(.*?)(?=^##\s|\Z)",
+    re.MULTILINE | re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_internal_contacts(state: dict, out_dir: str) -> list[str]:
+    """Extrahiert Filter-Patterns aus der `## Interne Kontakte`-Sektion
+    der kontext.md. Liefert lowercase-Strings für Substring-Match."""
+    text = load_context_text(state, out_dir)
+    if not text:
+        return []
+    m = INTERNAL_SECTION_RE.search(text)
+    if not m:
+        return []
+    patterns = []
+    for line in m.group(1).splitlines():
+        line = line.strip().lstrip("-*•").strip()
+        if not line or line.startswith("#"):
+            continue
+        patterns.append(line.lower())
+    return patterns
+
+
+def is_internal(candidate: dict, patterns: list[str]) -> bool:
+    if not patterns:
+        return False
+    haystack = (candidate.get("subject", "") + " " +
+                " ".join(candidate.get("participants", []))).lower()
+    return any(p in haystack for p in patterns)
+
+
+def cmd_akte(state: dict, model: str, out_dir: str) -> None:
+    """Kuratierter Gerichts-Export: validiert Mails gegen kontext.md,
+    filtert interne Korrespondenz automatisch raus."""
+    out = Path(out_dir).expanduser()
+    accepted = sorted(
+        [c for c in state["candidates"].values() if c["status"] == "accepted"],
+        key=lambda c: c["date_start"],
+    )
+    if not accepted:
+        print("Keine akzeptierten Mails — nichts zu validieren.")
+        return
+
+    ctx_text = load_context_text(state, out_dir).strip()
+    if not ctx_text:
+        print("Keine kontext.md vorhanden — /akte braucht den Kontext.\n"
+              "Mit /context edit anlegen.")
+        return
+
+    patterns = parse_internal_contacts(state, out_dir)
+    if not patterns:
+        print("⚠  Keine '## Interne Kontakte'-Sektion in kontext.md gefunden.\n"
+              "   Lege sie an (Liste mit Namen/Domains), sonst kann /akte\n"
+              "   keine internen Mails herausfiltern.")
+        try:
+            ans = input("Trotzdem fortfahren (alle Mails als extern)? [j/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if ans not in {"j", "ja", "y", "yes"}:
+            return
+
+    external = [c for c in accepted if not is_internal(c, patterns)]
+    internal = [c for c in accepted if is_internal(c, patterns)]
+    print(f"\n→ {len(accepted)} akzeptierte Mails: "
+          f"{len(external)} extern, {len(internal)} intern (gefiltert).")
+    if not external:
+        print("Keine externen Mails — Akte wäre leer. Abbruch.")
+        return
+
+    # Aufräumen
+    akte_dir = out / "akte_mails"
+    cleaned = 0
+    for fname in ("akte_zeitlicher_ablauf.md", "akte_zeitlicher_ablauf.csv",
+                  "akte_zusammenfassung.md", "akte_intern.md"):
+        f = out / fname
+        if f.exists():
+            f.unlink()
+            cleaned += 1
+    if akte_dir.exists():
+        for f in akte_dir.glob("*.md"):
+            f.unlink()
+            cleaned += 1
+    out.mkdir(parents=True, exist_ok=True)
+    akte_dir.mkdir(parents=True, exist_ok=True)
+    if cleaned:
+        print(f"   Vorhandene akte_*-Dateien aufgeräumt: {cleaned}.")
+
+    # Validierung pro Mail
+    print(f"\n→ Validiere {len(external)} externe Mails gegen kontext.md")
+    print("   (Strg-C bricht ab, bisherige Ergebnisse werden geschrieben.)\n")
+    validations: list[tuple[dict, dict]] = []
+    for i, c in enumerate(external, 1):
+        print(f"   [{i}/{len(external)}] {c['date_start']} — "
+              f"{c['subject'][:55]}", flush=True)
+        prompt = f"""Du validierst eine E-Mail gegen die Erinnerung des Mandanten.
+
+Erinnerung des Mandanten (kontext.md):
+---
+{ctx_text}
+---
+
+E-Mail:
+- Datum: {c['date_start']}
+- Betreff: {c['subject']}
+- Beteiligte: {', '.join(c['participants'])}
+- Bekannte Kernaussage: {c['summary']}
+- Auszug: {c['body_excerpt'][:1500]}
+
+Klassifiziere die Beziehung zwischen Mail und Erinnerung in genau einer Kategorie:
+- "confirmed":   die Mail bestätigt eine konkrete Aussage der Erinnerung
+- "extends":     die Mail erweitert/präzisiert die Erinnerung
+- "contradicts": die Mail widerspricht einer Aussage der Erinnerung
+- "new":         Punkt, der in der Erinnerung gar nicht vorkommt
+
+Formuliere für die Gerichtstabelle ein präzises, juristisch-nüchternes
+Ereignis (1 Satz, deutsch). Wenn die Mail eine Aussage der Erinnerung
+direkt belegt/widerlegt, nenne den Bezug knapp im Feld
+"context_reference" (sonst leer lassen).
+
+JSON: {{"classification": "confirmed|extends|contradicts|new",
+       "event": "<1-Satz>",
+       "context_reference": "<Bezug oder leer>"}}"""
+        try:
+            llm = json.loads(chat(model, [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ], json_mode=True))
+        except KeyboardInterrupt:
+            print("\n   Abgebrochen. Bisherige Ergebnisse werden geschrieben.")
+            break
+        except (json.JSONDecodeError, urllib.error.URLError) as e:
+            print(f"      LLM-Fehler: {e}")
+            llm = {"classification": "?", "event": c["summary"],
+                   "context_reference": ""}
+        validations.append((c, llm))
+
+    if not validations:
+        print("Keine validierten Mails. Abbruch.")
+        return
+
+    CLASS_MARK = {"confirmed": "✓", "extends": "+", "contradicts": "✗",
+                  "new": "—", "?": "?"}
+
+    def esc(s: str) -> str:
+        return str(s).replace("|", "\\|").replace("\n", " ")
+
+    md = ["# Akte: Zeitlicher Ablauf", "",
+          f"_Stand: {datetime.now().strftime('%Y-%m-%d')}, "
+          f"{len(validations)} externe Mail(s) als Belege_", "",
+          "**Bezug zur Erinnerung des Mandanten:** "
+          "✓ bestätigt &nbsp; + erweitert &nbsp; ✗ widerspricht &nbsp; — neu",
+          "",
+          "| Datum | Beteiligte | Ereignis | Bezug | Beleg |",
+          "|-------|------------|----------|:----:|-------|"]
+    for c, llm in validations:
+        parts = "; ".join(c["participants"][:3])
+        cls = llm.get("classification", "?")
+        mark = CLASS_MARK.get(cls, "?")
+        ref = (llm.get("context_reference") or "").strip()
+        ref_suffix = f" _({esc(ref)})_" if ref else ""
+        md.append(
+            f"| {c['date_start']} | {esc(parts)} | "
+            f"{esc(llm.get('event') or c['summary'])}{ref_suffix} | "
+            f"{mark} | {Path(c['uri']).name} |"
+        )
+    (out / "akte_zeitlicher_ablauf.md").write_text("\n".join(md) + "\n")
+
+    with (out / "akte_zeitlicher_ablauf.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Datum", "Beteiligte", "Ereignis", "Bezug",
+                    "Kontext-Verweis", "Beleg"])
+        for c, llm in validations:
+            w.writerow([
+                c["date_start"],
+                "; ".join(c["participants"]),
+                llm.get("event") or c["summary"],
+                llm.get("classification", "?"),
+                llm.get("context_reference", ""),
+                Path(c["uri"]).name,
+            ])
+
+    for c, _ in validations:
+        body = qmd.fetch(c["uri"], full=True)
+        (akte_dir / Path(c["uri"]).name).write_text(body)
+
+    if internal:
+        intern_md = [
+            "# Aussortiert: interne Korrespondenz",
+            "",
+            f"_NUR FÜR DICH — nicht für die Akte. {len(internal)} Mail(s), "
+            f"basierend auf `## Interne Kontakte` in kontext.md._",
+            "",
+            f"Filter-Patterns: {', '.join(repr(p) for p in patterns)}",
+            "",
+            "| Datum | Beteiligte | Betreff | Datei |",
+            "|-------|------------|---------|-------|",
+        ]
+        for c in sorted(internal, key=lambda x: x["date_start"]):
+            parts = "; ".join(c["participants"][:3])
+            intern_md.append(
+                f"| {c['date_start']} | {esc(parts)} | "
+                f"{esc(c['subject'])} | {Path(c['uri']).name} |"
+            )
+        (out / "akte_intern.md").write_text("\n".join(intern_md) + "\n")
+
+    print(f"\n→ Generiere narrative Zusammenfassung\n")
+    timeline = "\n".join(
+        f"- {c['date_start']} [{CLASS_MARK.get(llm.get('classification','?'),'?')}] "
+        f"{llm.get('event') or c['summary']}"
+        for c, llm in validations
+    )
+    summary_prompt = f"""Mandant: {state['case_description']}
+
+Erinnerung des Mandanten:
+---
+{ctx_text}
+---
+
+Validierte Timeline (chronologisch, externe Mails, mit Bezug zur Erinnerung):
+{timeline}
+
+Schreibe eine narrative Zusammenfassung für das Gericht (deutsch,
+juristisch nüchtern). Strukturiere nach erkennbaren Phasen. Mache
+deutlich, wo Mails die Erinnerung bestätigen (✓), erweitern/präzisieren
+(+), widersprechen (✗) oder einen neuen Punkt einführen (—). KEINE
+Erfindungen — nur was aus den validierten Mails ersichtlich ist.
+Verweise auf Daten und Beteiligte konkret."""
+    text = chat_stream(model, [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": summary_prompt},
+    ])
+    (out / "akte_zusammenfassung.md").write_text(
+        f"# Akte: Zusammenfassung\n\n_Stand: "
+        f"{datetime.now().strftime('%Y-%m-%d')}_\n\n{text}\n"
+    )
+
+    print(f"\n✓ {out / 'akte_zeitlicher_ablauf.md'}")
+    print(f"✓ {out / 'akte_zeitlicher_ablauf.csv'}")
+    print(f"✓ {out / 'akte_zusammenfassung.md'}")
+    print(f"✓ {akte_dir}/  ({len(validations)} Mails)")
+    if internal:
+        print(f"⊘ {out / 'akte_intern.md'}  "
+              f"(NUR für dich — {len(internal)} interne Mails aussortiert)")
+
+
 def cmd_export(state: dict, out_dir: str) -> None:
     out = Path(out_dir).expanduser()
     accepted = sorted(
@@ -807,7 +1054,10 @@ Befehle:
   /context [<pfad>|edit]    Hintergrund-Markdown anzeigen / setzen / öffnen
   /validate-context         prüft kontext.md gegen akzept. Mails (Konflikte!)
   /summary                  narrative Zusammenfassung erzeugen
-  /export                   Markdown + CSV + mails/ schreiben
+  /export                   roher Dump (alle accepted) → Markdown+CSV+mails/
+  /akte                     kuratierter Gerichts-Export: validiert Mails
+                            gegen kontext.md, filtert interne Korrespondenz
+                            (laut '## Interne Kontakte' in kontext.md) raus
   /case [<text>]            Fallbeschreibung anzeigen / setzen
   /edit <subject-fragment>  Kernaussage einer akzept. Mail ändern
   /undo <subject-fragment>  Mail zurück auf 'pending'
@@ -926,6 +1176,8 @@ def main() -> None:
                 cmd_summary(state, args.out, args.model); continue
             if line == "/export":
                 cmd_export(state, args.out); continue
+            if line == "/akte":
+                cmd_akte(state, args.model, args.out); continue
             if line.startswith("/edit"):
                 frag = line[len("/edit"):].strip().lower()
                 hits = [c for c in state["candidates"].values()

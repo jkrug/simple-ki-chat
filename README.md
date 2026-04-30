@@ -101,7 +101,9 @@ Beim ersten Start fragt das Tool nach einer kurzen Fallbeschreibung
 /validate-context         prüft kontext.md gegen die akzeptierten Mails:
                           gestützt / widersprochen / unbelegt + Such-Stichworte
 /summary                  narrative Zusammenfassung erzeugen
-/export                   schreibt Markdown + CSV + mails/-Ordner
+/export                   roher Dump (alle accepted): MD + CSV + mails/
+/akte                     kuratierter Gerichts-Export, validiert gegen
+                          kontext.md, interne Korrespondenz gefiltert
 /case [<text>]            Fallbeschreibung anzeigen / setzen
 /edit <subject-fragment>  Kernaussage einer akzept. Mail ändern
 /undo <subject-fragment>  Mail zurück auf 'pending'
@@ -152,6 +154,41 @@ Mandanten" mitgegeben.
   und legt bei Bedarf ein Skelett mit Sektionen an.
 - `/context <pfad>` setzt einen anderen Pfad (in der Session gespeichert).
 - `/context` allein zeigt Pfad + Vorschau.
+
+### `/akte` — kuratierter Gerichts-Export
+
+Endpunkt für die Aktenarbeit. Macht aus den akzeptierten Mails plus deiner
+`kontext.md` einen strukturierten, gerichtstauglichen Output:
+
+1. **Filtert interne Korrespondenz** automatisch raus — anhand einer
+   Sektion `## Interne Kontakte` in `kontext.md`. Beispiel:
+   ```markdown
+   ## Interne Kontakte (NICHT exportieren)
+   - Wolf
+   - Warnken
+   - taylorwessing.com
+   - meine-assistenz@…
+   ```
+   Mails werden als „intern" klassifiziert, wenn ein Pattern als Substring
+   in den Teilnehmern oder im Betreff auftaucht (case-insensitive).
+
+2. **Validiert jede externe Mail gegen die Erinnerung.** Pro Mail markiert
+   das LLM:
+   - ✓ **bestätigt** — eine Aussage der Erinnerung wird durch die Mail belegt
+   - ➕ **erweitert** — die Mail präzisiert/ergänzt die Erinnerung
+   - ✗ **widerspricht** — Mail steht im Widerspruch zur Erinnerung
+   - — **neu** — Mail führt einen Punkt ein, der in der Erinnerung fehlt
+
+3. **Räumt vorher auf** — alle `akte_*`-Dateien und der Inhalt von
+   `akte_mails/` werden vor dem Schreiben gelöscht. Keine Altlasten.
+
+4. **Schreibt vier Artefakte:**
+   - `akte_zeitlicher_ablauf.md` / `.csv` — Tabelle für das Gericht (Datum,
+     Beteiligte, Ereignis, Bezug zur Erinnerung, Beleg-Datei)
+   - `akte_zusammenfassung.md` — narrative Phasenübersicht für das Gericht
+   - `akte_mails/` — Volltext aller externen Belege
+   - `akte_intern.md` — Übersicht aussortierter interner Mails (NUR für
+     dich, nicht für die Akte)
 
 ### `/validate-context` — Erinnerung gegen Mails prüfen
 

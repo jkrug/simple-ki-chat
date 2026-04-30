@@ -26,6 +26,57 @@ try:
 except ImportError:
     HAVE_OPENPYXL = False
 
+try:
+    import readline
+    HAVE_READLINE = True
+except ImportError:
+    HAVE_READLINE = False
+
+COMMANDS = [
+    "/search", "/add", "/suggest", "/review", "/review fast", "/reject",
+    "/list", "/sessions", "/gaps", "/devil", "/context", "/context edit",
+    "/validate-context", "/validate", "/summary", "/export", "/dossier",
+    "/akte", "/case", "/edit", "/undo", "/help", "/quit",
+]
+
+
+def setup_readline(history_path: Path) -> None:
+    if not HAVE_READLINE:
+        return
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        readline.read_history_file(str(history_path))
+    except (OSError, FileNotFoundError):
+        pass
+    readline.set_history_length(1000)
+
+    # Whole line als Match-Einheit — sonst zerlegt readline bei Spaces
+    # und Multi-Word-Commands ('/review fast') werden umständlich.
+    readline.set_completer_delims("")
+
+    def completer(text: str, state: int):
+        if not text.startswith("/"):
+            return None
+        matches = [c for c in COMMANDS if c.startswith(text)]
+        return matches[state] if state < len(matches) else None
+
+    readline.set_completer(completer)
+    # macOS Python ist meist gegen libedit gelinkt, nicht GNU readline
+    if "libedit" in (readline.__doc__ or ""):
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
+
+    import atexit
+    atexit.register(lambda: _safe_write_history(history_path))
+
+
+def _safe_write_history(path: Path) -> None:
+    try:
+        readline.write_history_file(str(path))
+    except OSError:
+        pass
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:32b")
 DEFAULT_OUT = Path.home() / "marmalade-fall" / "output"
@@ -1315,6 +1366,8 @@ def main() -> None:
         return
     if not args.session:
         p.error("--session/-s ist Pflicht (außer mit --list-sessions).")
+
+    setup_readline(SESSIONS_DIR / ".recherche_history")
 
     state = load_session(args.session)
     if not state["case_description"]:
